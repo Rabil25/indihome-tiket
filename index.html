@@ -20,7 +20,7 @@
 const {useState,useEffect} = React;
 
 // ══════════════════════════════════════════════════════════════
-const API_URL = "PASTE_URL_APPS_SCRIPT_DISINI";
+const API_URL = "https://script.google.com/macros/s/AKfycbw1Gyl0aFO89rxgBbxlm0aPRyN_2QKeUnHfJY1hFKg_NgLRpYMjypr3gizQV3JwaWN6/exec";
 // ══════════════════════════════════════════════════════════════
 
 const AREA_LIST = [
@@ -200,7 +200,7 @@ function CustomerPortal({onSubmit,onGoAdmin}){
             {/* Baris 2: Email + No Internet */}
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
               <Inp label="Email" type="email" value={f.emailPlg} onChange={v=>sf("emailPlg",v)} required placeholder="nama@gmail.com" error={errors.emailPlg}/>
-              <Inp label="Nomor Internet / Pelanggan" value={f.nomorInternet} onChange={v=>sf("nomorInternet",v.replace(/[^0-9]/g,""))} placeholder="1234567890 (opsional)" error={errors.nomorInternet}/>
+              <Inp label="Nomor Internet / Pelanggan" value={f.nomorInternet} onChange={v=>sf("nomorInternet",v.replace(/[^0-9]/g,""))} placeholder="1114567890" error={errors.nomorInternet}/>
             </div>
             {/* Baris 3: Area + Masalah */}
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
