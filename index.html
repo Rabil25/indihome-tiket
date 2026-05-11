@@ -10,7 +10,8 @@
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
   body{font-family:'Segoe UI',Tahoma,Geneva,sans-serif;background:#0b0f1a}
-  ::-webkit-scrollbar{width:6px} ::-webkit-scrollbar-track{background:#0b0f1a} ::-webkit-scrollbar-thumb{background:#2d3748;border-radius:3px}
+  ::-webkit-scrollbar{width:6px}::-webkit-scrollbar-track{background:#0b0f1a}::-webkit-scrollbar-thumb{background:#2d3748;border-radius:3px}
+  @keyframes spin{to{transform:rotate(360deg)}}
 </style>
 </head>
 <body>
@@ -18,410 +19,107 @@
 <script type="text/babel">
 const {useState,useEffect} = React;
 
+// ══════════════════════════════════════════════════════════════
+// ⚙️ GANTI URL INI DENGAN URL APPS SCRIPT KAMU
+// ══════════════════════════════════════════════════════════════
+const API_URL = "https://script.google.com/macros/s/AKfycbzetwdnpObtpmyb4UzJ8MDMmi7IoIW_UNY9KQA-NsGCd3CI52slEb27rR0p0fYD1APb/exec";
+// ══════════════════════════════════════════════════════════════
+
 const MASALAH_LIST = ["Internet Tidak Bisa Connect","Kecepatan Lambat","Koneksi Putus-putus","UseeTV/TV Kabel Bermasalah","Gangguan Total","ONT/Modem Rusak","Tagihan/Billing","Pasang Baru","Cabut Pasang","Lainnya"];
 const STO_LIST = ["STO Bandar Lampung","STO Metro","STO Kotabumi","STO Pringsewu","STO Liwa","STO Kalianda","STO Menggala","STO Blambangan Umpu","STO Way Kanan","STO Tulang Bawang"];
 const PRIORITAS = {Rendah:{color:"#22c55e",bg:"#f0fdf4"},Sedang:{color:"#f59e0b",bg:"#fffbeb"},Tinggi:{color:"#ef4444",bg:"#fef2f2"},Kritis:{color:"#7c3aed",bg:"#faf5ff"}};
-const STATUS_CONFIG = {
-  baru:{label:"Baru",color:"#3b82f6",bg:"#eff6ff",icon:"🆕"},
-  diproses:{label:"Diproses",color:"#f59e0b",bg:"#fffbeb",icon:"⚙️"},
-  dieskalasi:{label:"Dieskalasi",color:"#8b5cf6",bg:"#f5f3ff",icon:"📤"},
-  dikerjakan:{label:"Dikerjakan",color:"#f97316",bg:"#fff7ed",icon:"🔧"},
-  selesai:{label:"Selesai",color:"#22c55e",bg:"#f0fdf4",icon:"✅"},
-};
-const TA_SEED = {id:"ta_root",name:"Admin TA",email:"admin.ta@indihome.id",password:"admin123",role:"ta",branch:"Pusat",createdAt:new Date().toISOString()};
+const STATUS_CONFIG = {baru:{label:"Baru",color:"#3b82f6",bg:"#eff6ff",icon:"🆕"},diproses:{label:"Diproses",color:"#f59e0b",bg:"#fffbeb",icon:"⚙️"},dieskalasi:{label:"Dieskalasi",color:"#8b5cf6",bg:"#f5f3ff",icon:"📤"},dikerjakan:{label:"Dikerjakan",color:"#f97316",bg:"#fff7ed",icon:"🔧"},selesai:{label:"Selesai",color:"#22c55e",bg:"#f0fdf4",icon:"✅"}};
 
-// Storage via localStorage
-const lsGet = (key,fb=[]) => { try{const v=localStorage.getItem(key);return v?JSON.parse(v):fb;}catch{return fb;} };
-const lsSet = (key,val) => { try{localStorage.setItem(key,JSON.stringify(val));}catch{} };
+const api = {
+  get: async (action) => { const r=await fetch(`${API_URL}?action=${action}`); return r.json(); },
+  post: async (action,data) => { const r=await fetch(API_URL,{method:"POST",body:JSON.stringify({action,data})}); return r.json(); },
+};
+const genId = () => { const d=new Date(),p=n=>String(n).padStart(2,"0"); return `IH-${d.getFullYear().toString().slice(2)}${p(d.getMonth()+1)}${p(d.getDate())}-${Math.random().toString(36).slice(2,6).toUpperCase()}`; };
+const fmtDate = iso => iso?new Date(iso).toLocaleString("id-ID",{timeZone:"Asia/Jakarta",day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"}):"-";
+const fmtDateShort = iso => iso?new Date(iso).toLocaleString("id-ID",{timeZone:"Asia/Jakarta",day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"}):"-";
+const lsGet=(k,fb)=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):fb;}catch{return fb;}};
+const lsSet=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v));}catch{}};
 
-const genId = () => {
-  const d=new Date(),pad=n=>String(n).padStart(2,"0");
-  return `IH-${d.getFullYear().toString().slice(2)}${pad(d.getMonth()+1)}${pad(d.getDate())}-${Math.random().toString(36).slice(2,6).toUpperCase()}`;
-};
-const fmtDate = iso => new Date(iso).toLocaleString("id-ID",{timeZone:"Asia/Jakarta",day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"});
-const fmtDateShort = iso => new Date(iso).toLocaleString("id-ID",{timeZone:"Asia/Jakarta",day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"});
-
-// ── UI ATOMS ──────────────────────────────────────────────────────────────────
-const Badge = ({status}) => {
-  const c=STATUS_CONFIG[status]||STATUS_CONFIG.baru;
-  return <span style={{background:c.bg,color:c.color,border:`1px solid ${c.color}`,borderRadius:20,padding:"2px 10px",fontSize:11,fontWeight:700,whiteSpace:"nowrap"}}>{c.icon} {c.label}</span>;
-};
-const PBadge = ({p}) => {
-  const c=PRIORITAS[p]||PRIORITAS.Sedang;
-  return <span style={{background:c.bg,color:c.color,border:`1px solid ${c.color}`,borderRadius:20,padding:"2px 10px",fontSize:11,fontWeight:700}}>{p}</span>;
-};
-const Inp = ({label,value,onChange,type="text",placeholder="",required=false,rows=0}) => (
-  <div style={{display:"flex",flexDirection:"column",gap:5}}>
-    <label style={{fontSize:12,fontWeight:600,color:"#94a3b8",textTransform:"uppercase",letterSpacing:0.5}}>{label}{required&&<span style={{color:"#e2001a"}}> *</span>}</label>
-    {rows>0
-      ? <textarea rows={rows} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} style={{padding:"10px 13px",borderRadius:8,border:"1.5px solid #2d3748",background:"#1e2535",color:"#e2e8f0",fontSize:14,fontFamily:"inherit",outline:"none",resize:"vertical"}}/>
-      : <input type={type} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} style={{padding:"10px 13px",borderRadius:8,border:"1.5px solid #2d3748",background:"#1e2535",color:"#e2e8f0",fontSize:14,fontFamily:"inherit",outline:"none"}}/>
-    }
-  </div>
-);
-const Sel = ({label,value,onChange,options,required=false}) => (
-  <div style={{display:"flex",flexDirection:"column",gap:5}}>
-    <label style={{fontSize:12,fontWeight:600,color:"#94a3b8",textTransform:"uppercase",letterSpacing:0.5}}>{label}{required&&<span style={{color:"#e2001a"}}> *</span>}</label>
-    <select value={value} onChange={e=>onChange(e.target.value)} style={{padding:"10px 13px",borderRadius:8,border:"1.5px solid #2d3748",background:"#1e2535",color:value?"#e2e8f0":"#64748b",fontSize:14,fontFamily:"inherit",outline:"none"}}>
-      <option value="">-- Pilih --</option>
-      {options.map(o=><option key={o} value={o}>{o}</option>)}
-    </select>
-  </div>
-);
-const Btn = ({children,onClick,v="primary",sm=false,disabled=false}) => {
-  const S={primary:{background:"linear-gradient(135deg,#e2001a,#c0001a)",color:"#fff",border:"none"},secondary:{background:"transparent",color:"#94a3b8",border:"1.5px solid #2d3748"},success:{background:"linear-gradient(135deg,#22c55e,#16a34a)",color:"#fff",border:"none"},purple:{background:"linear-gradient(135deg,#8b5cf6,#7c3aed)",color:"#fff",border:"none"}};
-  return <button onClick={onClick} disabled={disabled} style={{...S[v],padding:sm?"6px 14px":"10px 20px",borderRadius:8,cursor:disabled?"not-allowed":"pointer",fontWeight:700,fontSize:sm?12:14,fontFamily:"inherit",opacity:disabled?0.6:1,transition:"all 0.15s"}}>{children}</button>;
-};
-const Card = ({children,style={}}) => <div style={{background:"#151c2c",borderRadius:12,border:"1px solid #1e2a3a",padding:20,...style}}>{children}</div>;
-
-// ── EMAIL VIA ANTHROPIC API + GMAIL MCP ───────────────────────────────────────
 const sendEmailNotif = async (ticket) => {
   try {
-    const html = `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;background:#f8fafc;padding:24px;border-radius:12px"><div style="background:#e2001a;padding:20px 24px;border-radius:10px 10px 0 0"><h2 style="color:#fff;margin:0">✅ Laporan Gangguan Selesai</h2></div><div style="background:#fff;padding:24px;border-radius:0 0 10px 10px;border:1px solid #e5e7eb;border-top:none"><p>Yth. <strong>${ticket.namaPlg}</strong>,</p><p style="color:#6b7280">Laporan gangguan IndiHome Anda telah selesai ditangani.</p><table style="width:100%;border-collapse:collapse;font-size:14px"><tr style="background:#f9fafb"><td style="padding:10px;color:#6b7280;width:150px">No. Tiket</td><td style="padding:10px;font-weight:bold">${ticket.id}</td></tr><tr><td style="padding:10px;color:#6b7280">Masalah</td><td style="padding:10px">${ticket.masalah}</td></tr><tr style="background:#f9fafb"><td style="padding:10px;color:#6b7280">Teknisi</td><td style="padding:10px">${ticket.teknisi||"-"}</td></tr><tr><td style="padding:10px;color:#6b7280">Selesai</td><td style="padding:10px">${ticket.resolvedAt?fmtDate(ticket.resolvedAt):"-"}</td></tr>${ticket.catatanTA?`<tr style="background:#f9fafb"><td style="padding:10px;color:#6b7280;vertical-align:top">Catatan</td><td style="padding:10px">${ticket.catatanTA}</td></tr>`:""}</table><p style="color:#6b7280;font-size:13px;margin-top:16px">Jika masalah masih berlanjut, hubungi 147 atau ajukan laporan baru.</p></div></div>`;
-    const res = await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:500,messages:[{role:"user",content:`Kirim email ini via Gmail:\nKepada: ${ticket.emailPlg}\nSubjek: [Selesai] Tiket ${ticket.id} – ${ticket.masalah}\nHTML:\n${html}\nBalas JSON: {"success":true}`}],mcp_servers:[{type:"url",url:"https://gmailmcp.googleapis.com/mcp/v1",name:"gmail-mcp"}]})});
-    const data=await res.json();
-    return data.content?.some(b=>b.type==="text");
+    const html=`<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto"><div style="background:#e2001a;padding:20px;border-radius:10px 10px 0 0"><h2 style="color:#fff;margin:0">✅ Laporan Selesai Ditangani</h2></div><div style="background:#fff;padding:24px;border:1px solid #eee;border-top:none;border-radius:0 0 10px 10px"><p>Yth. <strong>${ticket.namaPlg}</strong>,</p><p style="color:#6b7280;margin:8px 0 16px">Laporan gangguan IndiHome Anda telah selesai ditangani.</p><table style="width:100%;border-collapse:collapse;font-size:14px"><tr style="background:#f9fafb"><td style="padding:10px;color:#6b7280;width:150px">No. Tiket</td><td style="padding:10px;font-weight:bold">${ticket.id}</td></tr><tr><td style="padding:10px;color:#6b7280">Masalah</td><td style="padding:10px">${ticket.masalah}</td></tr><tr style="background:#f9fafb"><td style="padding:10px;color:#6b7280">Teknisi</td><td style="padding:10px">${ticket.teknisi||"-"}</td></tr><tr><td style="padding:10px;color:#6b7280">Selesai</td><td style="padding:10px">${fmtDate(ticket.resolvedAt)}</td></tr>${ticket.catatanTA?`<tr style="background:#f9fafb"><td style="padding:10px;color:#6b7280;vertical-align:top">Catatan</td><td style="padding:10px">${ticket.catatanTA}</td></tr>`:""}</table></div></div>`;
+    const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:500,messages:[{role:"user",content:`Kirim email via Gmail:\nKepada: ${ticket.emailPlg}\nSubjek: [Selesai] Tiket ${ticket.id}\nHTML:\n${html}\nBalas JSON: {"success":true}`}],mcp_servers:[{type:"url",url:"https://gmailmcp.googleapis.com/mcp/v1",name:"gmail-mcp"}]})});
+    const d=await r.json(); return d.content?.some(b=>b.type==="text");
   } catch{return false;}
 };
 
-// ══════════════════════════════════════════════════════════════════════════════
-// CUSTOMER PORTAL
-// ══════════════════════════════════════════════════════════════════════════════
-function CustomerPortal({onSubmit,onGoAdmin}) {
-  const [f,setF]=useState({namaPlg:"",emailPlg:"",noTelp:"",sto:"",masalah:"",prioritas:"Sedang",deskripsi:""});
-  const [done,setDone]=useState(null);
-  const [loading,setLoading]=useState(false);
-  const sf=(k,v)=>setF(p=>({...p,[k]:v}));
+// UI ATOMS
+const Badge=({status})=>{const c=STATUS_CONFIG[status]||STATUS_CONFIG.baru;return <span style={{background:c.bg,color:c.color,border:`1px solid ${c.color}`,borderRadius:20,padding:"2px 10px",fontSize:11,fontWeight:700,whiteSpace:"nowrap"}}>{c.icon} {c.label}</span>;};
+const PBadge=({p})=>{const c=PRIORITAS[p]||PRIORITAS.Sedang;return <span style={{background:c.bg,color:c.color,border:`1px solid ${c.color}`,borderRadius:20,padding:"2px 10px",fontSize:11,fontWeight:700}}>{p}</span>;};
+const Inp=({label,value,onChange,type="text",placeholder="",required=false,rows=0})=>(<div style={{display:"flex",flexDirection:"column",gap:5}}><label style={{fontSize:12,fontWeight:600,color:"#94a3b8",textTransform:"uppercase",letterSpacing:0.5}}>{label}{required&&<span style={{color:"#e2001a"}}> *</span>}</label>{rows>0?<textarea rows={rows} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} style={{padding:"10px 13px",borderRadius:8,border:"1.5px solid #2d3748",background:"#1e2535",color:"#e2e8f0",fontSize:14,fontFamily:"inherit",outline:"none",resize:"vertical"}}/>:<input type={type} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} style={{padding:"10px 13px",borderRadius:8,border:"1.5px solid #2d3748",background:"#1e2535",color:"#e2e8f0",fontSize:14,fontFamily:"inherit",outline:"none"}}/>}</div>);
+const Sel=({label,value,onChange,options,required=false})=>(<div style={{display:"flex",flexDirection:"column",gap:5}}><label style={{fontSize:12,fontWeight:600,color:"#94a3b8",textTransform:"uppercase",letterSpacing:0.5}}>{label}{required&&<span style={{color:"#e2001a"}}> *</span>}</label><select value={value} onChange={e=>onChange(e.target.value)} style={{padding:"10px 13px",borderRadius:8,border:"1.5px solid #2d3748",background:"#1e2535",color:value?"#e2e8f0":"#64748b",fontSize:14,fontFamily:"inherit",outline:"none"}}><option value="">-- Pilih --</option>{options.map(o=><option key={o} value={o}>{o}</option>)}</select></div>);
+const Btn=({children,onClick,v="primary",disabled=false,sm=false})=>{const S={primary:{background:"linear-gradient(135deg,#e2001a,#c0001a)",color:"#fff",border:"none"},secondary:{background:"transparent",color:"#94a3b8",border:"1.5px solid #2d3748"},success:{background:"linear-gradient(135deg,#22c55e,#16a34a)",color:"#fff",border:"none"},purple:{background:"linear-gradient(135deg,#8b5cf6,#7c3aed)",color:"#fff",border:"none"}};return <button onClick={onClick} disabled={disabled} style={{...S[v],padding:sm?"6px 14px":"10px 20px",borderRadius:8,cursor:disabled?"not-allowed":"pointer",fontWeight:700,fontSize:sm?12:14,fontFamily:"inherit",opacity:disabled?0.6:1}}>{children}</button>;};
+const Card=({children,style={}})=><div style={{background:"#151c2c",borderRadius:12,border:"1px solid #1e2a3a",padding:20,...style}}>{children}</div>;
+const Spinner=()=>(<div style={{minHeight:"100vh",background:"#0b0f1a",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:16}}><div style={{width:40,height:40,border:"4px solid #1e2a3a",borderTop:"4px solid #e2001a",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/><div style={{color:"#64748b",fontSize:14}}>Memuat data dari Google Sheets...</div></div>);
 
-  const submit = async () => {
+// CUSTOMER PORTAL
+function CustomerPortal({onSubmit,onGoAdmin}){
+  const [f,setF]=useState({namaPlg:"",emailPlg:"",noTelp:"",sto:"",masalah:"",prioritas:"Sedang",deskripsi:""});
+  const [done,setDone]=useState(null);const [loading,setLoading]=useState(false);
+  const sf=(k,v)=>setF(p=>({...p,[k]:v}));
+  const submit=async()=>{
     if(!f.namaPlg||!f.emailPlg||!f.noTelp||!f.sto||!f.masalah||!f.deskripsi){alert("Lengkapi semua field wajib");return;}
     setLoading(true);
     const t={...f,id:genId(),status:"baru",createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()};
-    onSubmit(t);setDone(t.id);setLoading(false);
-  };
-
-  if(done) return (
-    <div style={{minHeight:"100vh",background:"#0b0f1a",display:"flex",alignItems:"center",justifyContent:"center",padding:24}}>
-      <Card style={{maxWidth:480,width:"100%",textAlign:"center",padding:40}}>
-        <div style={{fontSize:56,marginBottom:16}}>✅</div>
-        <h2 style={{color:"#e2e8f0",margin:"0 0 8px",fontSize:22}}>Laporan Terkirim!</h2>
-        <p style={{color:"#64748b",marginBottom:20}}>Tim kami akan segera menangani kendala Anda.</p>
-        <div style={{background:"#1e2535",borderRadius:10,padding:"14px 20px",marginBottom:24}}>
-          <div style={{color:"#64748b",fontSize:12,marginBottom:4}}>Nomor Tiket Anda</div>
-          <div style={{color:"#e2001a",fontSize:22,fontWeight:900,letterSpacing:2}}>{done}</div>
-        </div>
-        <p style={{color:"#64748b",fontSize:13}}>Notifikasi akan dikirim ke email Anda saat selesai ditangani.</p>
-        <div style={{marginTop:20}}><Btn onClick={()=>{setDone(null);setF({namaPlg:"",emailPlg:"",noTelp:"",sto:"",masalah:"",prioritas:"Sedang",deskripsi:""});}}>+ Laporan Baru</Btn></div>
-      </Card>
-    </div>
-  );
-
-  return (
-    <div style={{minHeight:"100vh",background:"#0b0f1a",padding:"24px 16px"}}>
-      <div style={{maxWidth:580,margin:"0 auto"}}>
-        <div style={{textAlign:"center",marginBottom:28}}>
-          <div style={{display:"inline-flex",alignItems:"center",gap:12,background:"linear-gradient(135deg,#e2001a,#c0001a)",padding:"12px 24px",borderRadius:50,marginBottom:16}}>
-            <span style={{fontSize:22}}>📡</span><span style={{color:"#fff",fontWeight:800,fontSize:16}}>IndiHome</span>
-          </div>
-          <h1 style={{color:"#e2e8f0",fontSize:24,fontWeight:800,margin:"0 0 8px"}}>Laporkan Kendala Internet</h1>
-          <p style={{color:"#64748b",fontSize:14}}>Isi form berikut dan tim kami akan segera membantu</p>
-        </div>
-        <Card>
-          <div style={{display:"flex",flexDirection:"column",gap:16}}>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-              <Inp label="Nama Lengkap" value={f.namaPlg} onChange={v=>sf("namaPlg",v)} required placeholder="Budi Santoso"/>
-              <Inp label="No. Telepon" value={f.noTelp} onChange={v=>sf("noTelp",v)} required placeholder="0812xxxxxxxx"/>
-            </div>
-            <Inp label="Email" type="email" value={f.emailPlg} onChange={v=>sf("emailPlg",v)} required placeholder="email@gmail.com"/>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-              <Sel label="Area / STO" value={f.sto} onChange={v=>sf("sto",v)} options={STO_LIST} required/>
-              <Sel label="Jenis Masalah" value={f.masalah} onChange={v=>sf("masalah",v)} options={MASALAH_LIST} required/>
-            </div>
-            <div>
-              <label style={{fontSize:12,fontWeight:600,color:"#94a3b8",textTransform:"uppercase",letterSpacing:0.5,display:"block",marginBottom:8}}>Tingkat Urgensi</label>
-              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                {Object.keys(PRIORITAS).map(p=>(
-                  <button key={p} onClick={()=>sf("prioritas",p)} style={{padding:"7px 16px",borderRadius:20,border:`2px solid ${PRIORITAS[p].color}`,background:f.prioritas===p?PRIORITAS[p].color:"transparent",color:f.prioritas===p?"#fff":PRIORITAS[p].color,cursor:"pointer",fontWeight:700,fontSize:12,fontFamily:"inherit"}}>{p}</button>
-                ))}
-              </div>
-            </div>
-            <Inp label="Deskripsi Masalah" value={f.deskripsi} onChange={v=>sf("deskripsi",v)} required rows={4} placeholder="Jelaskan detail kendala yang Anda alami..."/>
-            <Btn onClick={submit} disabled={loading}>{loading?"⏳ Mengirim...":"🚀 Kirim Laporan"}</Btn>
-          </div>
-        </Card>
-        <p style={{textAlign:"center",color:"#2d3748",fontSize:12,marginTop:20}}>
-          Sudah punya akun admin?{" "}
-          <button onClick={onGoAdmin} style={{background:"none",border:"none",color:"#e2001a",cursor:"pointer",fontWeight:700,fontSize:12}}>Login Admin →</button>
-        </p>
-      </div>
-    </div>
-  );
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// AUTH PAGE
-// ══════════════════════════════════════════════════════════════════════════════
-function AuthPage({onLogin,onBack}) {
-  const [tab,setTab]=useState("login");
-  const [f,setF]=useState({name:"",email:"",password:"",branch:""});
-  const [err,setErr]=useState("");
-  const [loading,setLoading]=useState(false);
-  const sf=(k,v)=>setF(p=>({...p,[k]:v}));
-
-  const login = () => {
-    setLoading(true);setErr("");
-    let users=lsGet("ih_users",[]);
-    if(!users.find(u=>u.id===TA_SEED.id)) users=[TA_SEED,...users];
-    const user=users.find(u=>u.email===f.email&&u.password===f.password);
-    if(!user){setErr("Email atau password salah");setLoading(false);return;}
-    lsSet("ih_session",user);onLogin(user);setLoading(false);
-  };
-
-  const register = () => {
-    setLoading(true);setErr("");
-    if(!f.name||!f.email||!f.password||!f.branch){setErr("Semua field wajib diisi");setLoading(false);return;}
-    let users=lsGet("ih_users",[]);
-    if(!users.find(u=>u.id===TA_SEED.id)) users=[TA_SEED,...users];
-    if(users.find(u=>u.email===f.email)){setErr("Email sudah terdaftar");setLoading(false);return;}
-    const nu={id:"u_"+Date.now(),name:f.name,email:f.email,password:f.password,branch:f.branch,role:"branch",createdAt:new Date().toISOString()};
-    lsSet("ih_users",[...users,nu]);lsSet("ih_session",nu);onLogin(nu);setLoading(false);
-  };
-
-  const Tab=({id,lb})=>(
-    <button onClick={()=>setTab(id)} style={{flex:1,padding:"10px",border:"none",background:tab===id?"#e2001a":"transparent",color:tab===id?"#fff":"#64748b",cursor:"pointer",fontWeight:700,fontSize:14,fontFamily:"inherit",borderRadius:8}}>{lb}</button>
-  );
-
-  return (
-    <div style={{minHeight:"100vh",background:"#0b0f1a",display:"flex",alignItems:"center",justifyContent:"center",padding:24}}>
-      <Card style={{maxWidth:400,width:"100%"}}>
-        <div style={{textAlign:"center",marginBottom:24}}>
-          <div style={{fontSize:36,marginBottom:8}}>🔐</div>
-          <h2 style={{color:"#e2e8f0",margin:"0 0 4px",fontSize:20}}>Portal Admin IndiHome</h2>
-          <p style={{color:"#64748b",fontSize:13}}>WOK Lampung</p>
-        </div>
-        <div style={{display:"flex",background:"#1e2535",borderRadius:10,padding:4,marginBottom:20,gap:4}}>
-          <Tab id="login" lb="Login"/><Tab id="register" lb="Daftar"/>
-        </div>
-        {err&&<div style={{background:"#2d1515",border:"1px solid #ef4444",color:"#ef4444",borderRadius:8,padding:"10px 14px",fontSize:13,marginBottom:16}}>⚠️ {err}</div>}
-        <div style={{display:"flex",flexDirection:"column",gap:14}}>
-          {tab==="register"&&<Inp label="Nama Lengkap" value={f.name} onChange={v=>sf("name",v)} required placeholder="Nama Admin"/>}
-          <Inp label="Email" type="email" value={f.email} onChange={v=>sf("email",v)} required placeholder="admin@indihome.id"/>
-          <Inp label="Password" type="password" value={f.password} onChange={v=>sf("password",v)} required placeholder="••••••••"/>
-          {tab==="register"&&<Sel label="Branch / STO" value={f.branch} onChange={v=>sf("branch",v)} options={STO_LIST} required/>}
-          <Btn onClick={tab==="login"?login:register} disabled={loading}>{loading?"⏳...":tab==="login"?"🔑 Login":"✅ Daftar & Masuk"}</Btn>
-        </div>
-        {tab==="login"&&<div style={{marginTop:12,padding:"10px 14px",background:"#1e2535",borderRadius:8,fontSize:12,color:"#64748b"}}>
-          <strong style={{color:"#94a3b8"}}>Demo Admin TA:</strong> admin.ta@indihome.id / admin123
-        </div>}
-        <button onClick={onBack} style={{width:"100%",background:"none",border:"none",color:"#64748b",cursor:"pointer",fontSize:13,marginTop:16,padding:8}}>← Kembali ke Portal Pelanggan</button>
-      </Card>
-    </div>
-  );
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// TICKET MODAL
-// ══════════════════════════════════════════════════════════════════════════════
-function TicketModal({ticket,user,onClose,onUpdate}) {
-  const [teknisi,setTeknisi]=useState(ticket.teknisi||"");
-  const [catatan,setCatatan]=useState(ticket.catatanTA||"");
-  const [loading,setLoading]=useState(false);
-  const [emailMsg,setEmailMsg]=useState("");
-
-  const upd = async (patch) => {
-    setLoading(true);onUpdate({...ticket,...patch,updatedAt:new Date().toISOString()});setLoading(false);
-  };
-  const finish = async () => {
-    setLoading(true);
-    const updated={...ticket,status:"selesai",teknisi,catatanTA:catatan,resolvedAt:new Date().toISOString(),updatedAt:new Date().toISOString()};
-    onUpdate(updated);setEmailMsg("📧 Mengirim notifikasi email...");
-    const ok=await sendEmailNotif(updated);
-    setEmailMsg(ok?"✅ Email terkirim ke pelanggan":"⚠️ Tiket selesai, email gagal (cek koneksi Gmail)");
+    const res=await api.post("addTicket",t);
+    if(res.success){setDone(t.id);onSubmit(t);}else alert("Gagal: "+(res.error||"Cek koneksi & URL API"));
     setLoading(false);
   };
-
-  const canProcess=user.role==="branch"&&ticket.status==="baru";
-  const canEsc=user.role==="branch"&&ticket.status==="diproses";
-  const canWork=user.role==="ta"&&ticket.status==="dieskalasi";
-  const canFinish=user.role==="ta"&&ticket.status==="dikerjakan";
-
-  return (
-    <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.75)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
-      <div onClick={e=>e.stopPropagation()} style={{background:"#151c2c",borderRadius:16,border:"1px solid #1e2a3a",width:"100%",maxWidth:600,maxHeight:"90vh",overflow:"auto"}}>
-        <div style={{background:"linear-gradient(135deg,#e2001a,#c0001a)",padding:"16px 20px",borderRadius:"16px 16px 0 0",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-          <div>
-            <div style={{color:"#fff",fontWeight:800,fontFamily:"monospace",fontSize:16}}>{ticket.id}</div>
-            <div style={{color:"#ffd0d0",fontSize:12}}>{fmtDate(ticket.createdAt)}</div>
-          </div>
-          <button onClick={onClose} style={{background:"rgba(255,255,255,0.2)",border:"none",color:"#fff",width:32,height:32,borderRadius:8,cursor:"pointer",fontSize:18,fontWeight:700}}>×</button>
-        </div>
-        <div style={{padding:20,display:"flex",flexDirection:"column",gap:14}}>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-            {[["👤 Pelanggan",ticket.namaPlg],["📞 Telepon",ticket.noTelp],["📧 Email",ticket.emailPlg],["🏢 STO",ticket.sto],["🔧 Masalah",ticket.masalah]].map(([k,v])=>(
-              <div key={k} style={{background:"#1e2535",borderRadius:8,padding:"10px 14px"}}>
-                <div style={{color:"#64748b",fontSize:11,marginBottom:4}}>{k}</div>
-                <div style={{color:"#e2e8f0",fontSize:13,fontWeight:600}}>{v}</div>
-              </div>
-            ))}
-            <div style={{background:"#1e2535",borderRadius:8,padding:"10px 14px"}}>
-              <div style={{color:"#64748b",fontSize:11,marginBottom:4}}>⚡ Prioritas</div>
-              <PBadge p={ticket.prioritas}/>
-            </div>
-          </div>
-          <div style={{background:"#1e2535",borderRadius:8,padding:"12px 14px"}}>
-            <div style={{color:"#64748b",fontSize:11,marginBottom:6}}>📝 DESKRIPSI</div>
-            <div style={{color:"#e2e8f0",fontSize:14,lineHeight:1.6}}>{ticket.deskripsi}</div>
-          </div>
-          <div style={{display:"flex",alignItems:"center",gap:10}}><span style={{color:"#64748b",fontSize:13}}>Status:</span><Badge status={ticket.status}/></div>
-          {user.role==="ta"&&["dieskalasi","dikerjakan","selesai"].includes(ticket.status)&&(
-            <div style={{display:"flex",flexDirection:"column",gap:10}}>
-              <Inp label="Nama Teknisi" value={teknisi} onChange={setTeknisi} placeholder="Nama/Tim teknisi lapangan"/>
-              <Inp label="Catatan Penanganan" value={catatan} onChange={setCatatan} rows={3} placeholder="Tindakan, hasil cek, dll."/>
-            </div>
-          )}
-          {ticket.teknisi&&user.role==="branch"&&(
-            <div style={{background:"#1e2535",borderRadius:8,padding:"12px 14px"}}>
-              <div style={{color:"#64748b",fontSize:11,marginBottom:6}}>👷 TEKNISI & CATATAN TA</div>
-              <div style={{color:"#e2e8f0",fontSize:14}}>{ticket.teknisi}</div>
-              {ticket.catatanTA&&<div style={{color:"#94a3b8",fontSize:13,marginTop:6}}>{ticket.catatanTA}</div>}
-            </div>
-          )}
-          {emailMsg&&<div style={{background:"#1e2535",borderRadius:8,padding:"10px 14px",color:"#94a3b8",fontSize:13}}>{emailMsg}</div>}
-          <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
-            {canProcess&&<Btn onClick={()=>upd({status:"diproses"})} disabled={loading} v="secondary">⚙️ Proses</Btn>}
-            {canEsc&&<Btn onClick={()=>upd({status:"dieskalasi"})} disabled={loading} v="purple">📤 Eskalasi ke TA</Btn>}
-            {canWork&&<Btn onClick={()=>upd({status:"dikerjakan",teknisi,catatanTA:catatan})} disabled={loading} v="secondary">🔧 Assign Teknisi</Btn>}
-            {canFinish&&<Btn onClick={finish} disabled={loading} v="success">✅ Selesai & Email Pelanggan</Btn>}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+  if(done) return(<div style={{minHeight:"100vh",background:"#0b0f1a",display:"flex",alignItems:"center",justifyContent:"center",padding:24}}><Card style={{maxWidth:480,width:"100%",textAlign:"center",padding:40}}><div style={{fontSize:56,marginBottom:16}}>✅</div><h2 style={{color:"#e2e8f0",margin:"0 0 8px",fontSize:22}}>Laporan Terkirim!</h2><p style={{color:"#64748b",marginBottom:20}}>Tim kami akan segera menangani kendala Anda.</p><div style={{background:"#1e2535",borderRadius:10,padding:"14px 20px",marginBottom:20}}><div style={{color:"#64748b",fontSize:12,marginBottom:4}}>Nomor Tiket Anda</div><div style={{color:"#e2001a",fontSize:22,fontWeight:900,letterSpacing:2}}>{done}</div></div><p style={{color:"#64748b",fontSize:13,marginBottom:20}}>Notifikasi akan dikirim ke email Anda saat selesai.</p><Btn onClick={()=>{setDone(null);setF({namaPlg:"",emailPlg:"",noTelp:"",sto:"",masalah:"",prioritas:"Sedang",deskripsi:""});}}>+ Laporan Baru</Btn></Card></div>);
+  return(<div style={{minHeight:"100vh",background:"#0b0f1a",padding:"24px 16px"}}><div style={{maxWidth:580,margin:"0 auto"}}><div style={{textAlign:"center",marginBottom:28}}><div style={{display:"inline-flex",alignItems:"center",gap:12,background:"linear-gradient(135deg,#e2001a,#c0001a)",padding:"12px 24px",borderRadius:50,marginBottom:16}}><span style={{fontSize:22}}>📡</span><span style={{color:"#fff",fontWeight:800,fontSize:16}}>IndiHome</span></div><h1 style={{color:"#e2e8f0",fontSize:24,fontWeight:800,margin:"0 0 8px"}}>Laporkan Kendala Internet</h1><p style={{color:"#64748b",fontSize:14}}>Isi form berikut dan tim kami akan segera membantu</p></div><Card><div style={{display:"flex",flexDirection:"column",gap:16}}><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}><Inp label="Nama Lengkap" value={f.namaPlg} onChange={v=>sf("namaPlg",v)} required placeholder="Budi Santoso"/><Inp label="No. Telepon" value={f.noTelp} onChange={v=>sf("noTelp",v)} required placeholder="0812xxxxxxxx"/></div><Inp label="Email" type="email" value={f.emailPlg} onChange={v=>sf("emailPlg",v)} required placeholder="email@gmail.com"/><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}><Sel label="Area / STO" value={f.sto} onChange={v=>sf("sto",v)} options={STO_LIST} required/><Sel label="Jenis Masalah" value={f.masalah} onChange={v=>sf("masalah",v)} options={MASALAH_LIST} required/></div><div><label style={{fontSize:12,fontWeight:600,color:"#94a3b8",textTransform:"uppercase",letterSpacing:0.5,display:"block",marginBottom:8}}>Tingkat Urgensi</label><div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{Object.keys(PRIORITAS).map(p=>(<button key={p} onClick={()=>sf("prioritas",p)} style={{padding:"7px 16px",borderRadius:20,border:`2px solid ${PRIORITAS[p].color}`,background:f.prioritas===p?PRIORITAS[p].color:"transparent",color:f.prioritas===p?"#fff":PRIORITAS[p].color,cursor:"pointer",fontWeight:700,fontSize:12,fontFamily:"inherit"}}>{p}</button>))}</div></div><Inp label="Deskripsi Masalah" value={f.deskripsi} onChange={v=>sf("deskripsi",v)} required rows={4} placeholder="Jelaskan detail kendala yang Anda alami..."/><Btn onClick={submit} disabled={loading}>{loading?"⏳ Mengirim...":"🚀 Kirim Laporan"}</Btn></div></Card><p style={{textAlign:"center",color:"#2d3748",fontSize:12,marginTop:20}}>Sudah punya akun admin?{" "}<button onClick={onGoAdmin} style={{background:"none",border:"none",color:"#e2001a",cursor:"pointer",fontWeight:700,fontSize:12}}>Login Admin →</button></p></div></div>);
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
+// AUTH PAGE
+function AuthPage({onLogin,onBack}){
+  const [tab,setTab]=useState("login");const [f,setF]=useState({name:"",email:"",password:"",branch:""});const [err,setErr]=useState("");const [loading,setLoading]=useState(false);const sf=(k,v)=>setF(p=>({...p,[k]:v}));
+  const login=async()=>{setLoading(true);setErr("");const res=await api.post("login",{email:f.email,password:f.password});if(res.error){setErr(res.error);setLoading(false);return;}lsSet("ih_session",res.user);onLogin(res.user);setLoading(false);};
+  const register=async()=>{setLoading(true);setErr("");if(!f.name||!f.email||!f.password||!f.branch){setErr("Semua field wajib diisi");setLoading(false);return;}const nu={id:"u_"+Date.now(),name:f.name,email:f.email,password:f.password,branch:f.branch,role:"branch",createdAt:new Date().toISOString()};const res=await api.post("addUser",nu);if(res.error){setErr(res.error);setLoading(false);return;}lsSet("ih_session",nu);onLogin(nu);setLoading(false);};
+  const Tab=({id,lb})=>(<button onClick={()=>setTab(id)} style={{flex:1,padding:"10px",border:"none",background:tab===id?"#e2001a":"transparent",color:tab===id?"#fff":"#64748b",cursor:"pointer",fontWeight:700,fontSize:14,fontFamily:"inherit",borderRadius:8}}>{lb}</button>);
+  return(<div style={{minHeight:"100vh",background:"#0b0f1a",display:"flex",alignItems:"center",justifyContent:"center",padding:24}}><Card style={{maxWidth:400,width:"100%"}}><div style={{textAlign:"center",marginBottom:24}}><div style={{fontSize:36,marginBottom:8}}>🔐</div><h2 style={{color:"#e2e8f0",margin:"0 0 4px",fontSize:20}}>Portal Admin IndiHome</h2><p style={{color:"#64748b",fontSize:13}}>WOK Lampung</p></div><div style={{display:"flex",background:"#1e2535",borderRadius:10,padding:4,marginBottom:20,gap:4}}><Tab id="login" lb="Login"/><Tab id="register" lb="Daftar"/></div>{err&&<div style={{background:"#2d1515",border:"1px solid #ef4444",color:"#ef4444",borderRadius:8,padding:"10px 14px",fontSize:13,marginBottom:16}}>⚠️ {err}</div>}<div style={{display:"flex",flexDirection:"column",gap:14}}>{tab==="register"&&<Inp label="Nama Lengkap" value={f.name} onChange={v=>sf("name",v)} required placeholder="Nama Admin"/>}<Inp label="Email" type="email" value={f.email} onChange={v=>sf("email",v)} required placeholder="admin@indihome.id"/><Inp label="Password" type="password" value={f.password} onChange={v=>sf("password",v)} required placeholder="••••••••"/>{tab==="register"&&<Sel label="Branch / STO" value={f.branch} onChange={v=>sf("branch",v)} options={STO_LIST} required/>}<Btn onClick={tab==="login"?login:register} disabled={loading}>{loading?"⏳...":tab==="login"?"🔑 Login":"✅ Daftar & Masuk"}</Btn></div>{tab==="login"&&<div style={{marginTop:12,padding:"10px 14px",background:"#1e2535",borderRadius:8,fontSize:12,color:"#64748b"}}><strong style={{color:"#94a3b8"}}>Demo Admin TA:</strong> admin.ta@indihome.id / admin123</div>}<button onClick={onBack} style={{width:"100%",background:"none",border:"none",color:"#64748b",cursor:"pointer",fontSize:13,marginTop:16,padding:8}}>← Kembali ke Portal Pelanggan</button></Card></div>);
+}
+
+// TICKET MODAL
+function TicketModal({ticket,user,onClose,onUpdate}){
+  const [teknisi,setTeknisi]=useState(ticket.teknisi||"");const [catatan,setCatatan]=useState(ticket.catatanTA||"");const [loading,setLoading]=useState(false);const [emailMsg,setEmailMsg]=useState("");
+  const upd=async(patch)=>{setLoading(true);const updated={...ticket,...patch,updatedAt:new Date().toISOString()};const res=await api.post("updateTicket",updated);if(res.success)onUpdate(updated);else alert("Gagal: "+(res.error||""));setLoading(false);};
+  const finish=async()=>{setLoading(true);const updated={...ticket,status:"selesai",teknisi,catatanTA:catatan,resolvedAt:new Date().toISOString(),updatedAt:new Date().toISOString()};const res=await api.post("updateTicket",updated);if(res.success){onUpdate(updated);setEmailMsg("📧 Mengirim notifikasi email...");const ok=await sendEmailNotif(updated);setEmailMsg(ok?"✅ Email terkirim ke pelanggan":"⚠️ Tiket selesai, email gagal");}else alert("Gagal: "+(res.error||""));setLoading(false);};
+  const canProcess=user.role==="branch"&&ticket.status==="baru";const canEsc=user.role==="branch"&&ticket.status==="diproses";const canWork=user.role==="ta"&&ticket.status==="dieskalasi";const canFinish=user.role==="ta"&&ticket.status==="dikerjakan";
+  return(<div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.75)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}><div onClick={e=>e.stopPropagation()} style={{background:"#151c2c",borderRadius:16,border:"1px solid #1e2a3a",width:"100%",maxWidth:600,maxHeight:"90vh",overflow:"auto"}}><div style={{background:"linear-gradient(135deg,#e2001a,#c0001a)",padding:"16px 20px",borderRadius:"16px 16px 0 0",display:"flex",justifyContent:"space-between",alignItems:"center"}}><div><div style={{color:"#fff",fontWeight:800,fontFamily:"monospace",fontSize:16}}>{ticket.id}</div><div style={{color:"#ffd0d0",fontSize:12}}>{fmtDate(ticket.createdAt)}</div></div><button onClick={onClose} style={{background:"rgba(255,255,255,0.2)",border:"none",color:"#fff",width:32,height:32,borderRadius:8,cursor:"pointer",fontSize:18,fontWeight:700}}>×</button></div><div style={{padding:20,display:"flex",flexDirection:"column",gap:14}}><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>{[["👤 Pelanggan",ticket.namaPlg],["📞 Telepon",ticket.noTelp],["📧 Email",ticket.emailPlg],["🏢 STO",ticket.sto],["🔧 Masalah",ticket.masalah]].map(([k,v])=>(<div key={k} style={{background:"#1e2535",borderRadius:8,padding:"10px 14px"}}><div style={{color:"#64748b",fontSize:11,marginBottom:4}}>{k}</div><div style={{color:"#e2e8f0",fontSize:13,fontWeight:600}}>{v}</div></div>))}<div style={{background:"#1e2535",borderRadius:8,padding:"10px 14px"}}><div style={{color:"#64748b",fontSize:11,marginBottom:6}}>⚡ Prioritas</div><PBadge p={ticket.prioritas}/></div></div><div style={{background:"#1e2535",borderRadius:8,padding:"12px 14px"}}><div style={{color:"#64748b",fontSize:11,marginBottom:6}}>📝 DESKRIPSI</div><div style={{color:"#e2e8f0",fontSize:14,lineHeight:1.6}}>{ticket.deskripsi}</div></div><div style={{display:"flex",alignItems:"center",gap:10}}><span style={{color:"#64748b",fontSize:13}}>Status:</span><Badge status={ticket.status}/></div>{user.role==="ta"&&["dieskalasi","dikerjakan","selesai"].includes(ticket.status)&&(<div style={{display:"flex",flexDirection:"column",gap:10}}><Inp label="Nama Teknisi" value={teknisi} onChange={setTeknisi} placeholder="Nama/Tim teknisi"/><Inp label="Catatan" value={catatan} onChange={setCatatan} rows={3} placeholder="Tindakan, hasil cek, dll."/></div>)}{ticket.teknisi&&user.role==="branch"&&(<div style={{background:"#1e2535",borderRadius:8,padding:"12px 14px"}}><div style={{color:"#64748b",fontSize:11,marginBottom:6}}>👷 TEKNISI & CATATAN TA</div><div style={{color:"#e2e8f0",fontSize:14}}>{ticket.teknisi}</div>{ticket.catatanTA&&<div style={{color:"#94a3b8",fontSize:13,marginTop:6}}>{ticket.catatanTA}</div>}</div>)}{emailMsg&&<div style={{background:"#1e2535",borderRadius:8,padding:"10px 14px",color:"#94a3b8",fontSize:13}}>{emailMsg}</div>}<div style={{display:"flex",gap:10,flexWrap:"wrap"}}>{canProcess&&<Btn onClick={()=>upd({status:"diproses"})} disabled={loading} v="secondary">⚙️ Proses</Btn>}{canEsc&&<Btn onClick={()=>upd({status:"dieskalasi"})} disabled={loading} v="purple">📤 Eskalasi ke TA</Btn>}{canWork&&<Btn onClick={()=>upd({status:"dikerjakan",teknisi,catatanTA:catatan})} disabled={loading} v="secondary">🔧 Assign Teknisi</Btn>}{canFinish&&<Btn onClick={finish} disabled={loading} v="success">✅ Selesai & Email Pelanggan</Btn>}</div></div></div></div>);
+}
+
 // DASHBOARD
-// ══════════════════════════════════════════════════════════════════════════════
-function Dashboard({user,tickets,onUpdate,onLogout}) {
-  const [view,setView]=useState("tickets");
-  const [sel,setSel]=useState(null);
-  const [filter,setFilter]=useState("all");
-  const [search,setSearch]=useState("");
-
+function Dashboard({user,tickets,setTickets,onLogout}){
+  const [view,setView]=useState("tickets");const [sel,setSel]=useState(null);const [filter,setFilter]=useState("all");const [search,setSearch]=useState("");const [refreshing,setRefreshing]=useState(false);
+  const refresh=async()=>{setRefreshing(true);const d=await api.get("getTickets");if(Array.isArray(d))setTickets(d);setRefreshing(false);};
   const myT=user.role==="ta"?tickets.filter(t=>["dieskalasi","dikerjakan","selesai"].includes(t.status)):tickets;
-  const filtered=myT.filter(t=>{
-    const mf=filter==="all"||t.status===filter;
-    const ms=!search||[t.id,t.namaPlg,t.masalah,t.sto].some(v=>v.toLowerCase().includes(search.toLowerCase()));
-    return mf&&ms;
-  }).sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));
-
+  const filtered=myT.filter(t=>{const mf=filter==="all"||t.status===filter;const ms=!search||[t.id,t.namaPlg,t.masalah,t.sto].some(v=>String(v).toLowerCase().includes(search.toLowerCase()));return mf&&ms;}).sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));
   const stats={total:myT.length,baru:myT.filter(t=>t.status==="baru").length,diproses:myT.filter(t=>t.status==="diproses").length,dieskalasi:myT.filter(t=>t.status==="dieskalasi").length,dikerjakan:myT.filter(t=>t.status==="dikerjakan").length,selesai:myT.filter(t=>t.status==="selesai").length};
-
-  const NavBtn=({id,ic,lb})=>(
-    <button onClick={()=>setView(id)} style={{display:"flex",alignItems:"center",gap:10,padding:"11px 16px",margin:"2px 8px",background:view===id?"rgba(226,0,26,0.15)":"none",border:view===id?"1px solid rgba(226,0,26,0.3)":"1px solid transparent",borderRadius:8,color:view===id?"#e2001a":"#64748b",cursor:"pointer",fontWeight:600,fontSize:13,fontFamily:"inherit"}}>{ic} {lb}</button>
-  );
-
-  return (
-    <div style={{minHeight:"100vh",background:"#0b0f1a",display:"flex"}}>
-      {/* Sidebar */}
-      <div style={{width:220,background:"#0f1520",borderRight:"1px solid #1e2a3a",display:"flex",flexDirection:"column",padding:"20px 0",flexShrink:0}}>
-        <div style={{padding:"0 16px 20px",borderBottom:"1px solid #1e2a3a",marginBottom:12}}>
-          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
-            <span>📡</span><span style={{color:"#e2001a",fontWeight:800,fontSize:15}}>IndiHome</span>
-          </div>
-          <div style={{color:"#64748b",fontSize:11}}>Ticket Management</div>
-        </div>
-        <NavBtn id="tickets" ic="🎫" lb="Tiket"/>
-        <NavBtn id="stats" ic="📊" lb="Statistik"/>
-        <div style={{flex:1}}/>
-        <div style={{padding:16,borderTop:"1px solid #1e2a3a"}}>
-          <div style={{background:"#1e2535",borderRadius:8,padding:12,marginBottom:10}}>
-            <div style={{color:"#e2e8f0",fontWeight:600,fontSize:13,marginBottom:2}}>{user.name}</div>
-            <div style={{color:"#e2001a",fontSize:11,fontWeight:700,textTransform:"uppercase"}}>{user.role==="ta"?"Admin TA":"Admin Branch"}</div>
-            <div style={{color:"#64748b",fontSize:11}}>{user.branch}</div>
-          </div>
-          <button onClick={onLogout} style={{width:"100%",padding:"8px",background:"none",border:"1px solid #2d3748",borderRadius:8,color:"#64748b",cursor:"pointer",fontSize:12,fontFamily:"inherit"}}>↩ Logout</button>
-        </div>
-      </div>
-      {/* Main */}
-      <div style={{flex:1,overflow:"auto",padding:24}}>
-        {view==="stats"?(
-          <div>
-            <h2 style={{color:"#e2e8f0",margin:"0 0 20px",fontSize:20}}>📊 Statistik Tiket</h2>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:12,marginBottom:24}}>
-              {[["Total",stats.total,"#e2e8f0"],["Baru",stats.baru,"#3b82f6"],["Diproses",stats.diproses,"#f59e0b"],["Dieskalasi",stats.dieskalasi,"#8b5cf6"],["Dikerjakan",stats.dikerjakan,"#f97316"],["Selesai",stats.selesai,"#22c55e"]].map(([l,v,c])=>(
-                <div key={l} style={{background:"#151c2c",borderRadius:10,border:"1px solid #1e2a3a",padding:"14px 18px"}}>
-                  <div style={{color:"#64748b",fontSize:11,fontWeight:600,textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>{l}</div>
-                  <div style={{color:c,fontSize:28,fontWeight:900}}>{v}</div>
-                </div>
-              ))}
-            </div>
-            <Card><div style={{color:"#94a3b8",fontSize:14}}>Tingkat penyelesaian: <strong style={{color:"#22c55e",fontSize:20}}>{stats.total?Math.round(stats.selesai/stats.total*100):0}%</strong></div></Card>
-          </div>
-        ):(
-          <div>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20,flexWrap:"wrap",gap:12}}>
-              <h2 style={{color:"#e2e8f0",margin:0,fontSize:20}}>🎫 {user.role==="ta"?"Tiket Eskalasi":"Semua Tiket"} <span style={{color:"#64748b",fontSize:14,fontWeight:400}}>({filtered.length})</span></h2>
-              <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 Cari tiket, nama, masalah..." style={{padding:"9px 14px",borderRadius:8,border:"1.5px solid #2d3748",background:"#1e2535",color:"#e2e8f0",fontSize:13,fontFamily:"inherit",outline:"none",width:240}}/>
-            </div>
-            <div style={{display:"flex",gap:6,marginBottom:16,flexWrap:"wrap"}}>
-              {[["all","Semua",stats.total],...Object.entries(STATUS_CONFIG).map(([k,v])=>[k,v.label,stats[k]||0])].map(([k,l,n])=>(
-                <button key={k} onClick={()=>setFilter(k)} style={{padding:"6px 14px",borderRadius:20,border:`1.5px solid ${filter===k?"#e2001a":"#2d3748"}`,background:filter===k?"rgba(226,0,26,0.15)":"transparent",color:filter===k?"#e2001a":"#64748b",cursor:"pointer",fontWeight:600,fontSize:12,fontFamily:"inherit"}}>{l} <span style={{background:"#1e2535",borderRadius:10,padding:"1px 6px",fontSize:10,marginLeft:4}}>{n}</span></button>
-              ))}
-            </div>
-            <div style={{display:"grid",gridTemplateColumns:"130px 1fr 120px 90px 90px 80px",gap:12,padding:"8px 16px",marginBottom:4}}>
-              {["ID TIKET","PELANGGAN","STO","PRIORITAS","STATUS","MASUK"].map(h=><div key={h} style={{color:"#64748b",fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5}}>{h}</div>)}
-            </div>
-            {filtered.length===0?<div style={{textAlign:"center",padding:40,color:"#64748b"}}>Tidak ada tiket</div>:filtered.map(t=>(
-              <div key={t.id} onClick={()=>setSel(t)} style={{display:"grid",gridTemplateColumns:"130px 1fr 120px 90px 90px 80px",gap:12,alignItems:"center",padding:"12px 16px",borderRadius:8,border:"1px solid #1e2a3a",background:"#151c2c",cursor:"pointer",marginBottom:6,transition:"border 0.15s"}}
-                onMouseEnter={e=>e.currentTarget.style.borderColor="#e2001a"} onMouseLeave={e=>e.currentTarget.style.borderColor="#1e2a3a"}>
-                <div style={{fontFamily:"monospace",fontSize:12,color:"#e2001a",fontWeight:700}}>{t.id}</div>
-                <div><div style={{color:"#e2e8f0",fontSize:14,fontWeight:600}}>{t.namaPlg}</div><div style={{color:"#64748b",fontSize:12}}>{t.masalah}</div></div>
-                <div style={{color:"#94a3b8",fontSize:12}}>{t.sto}</div>
-                <PBadge p={t.prioritas}/>
-                <Badge status={t.status}/>
-                <div style={{color:"#64748b",fontSize:11}}>{fmtDateShort(t.createdAt)}</div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-      {sel&&<TicketModal ticket={sel} user={user} onClose={()=>setSel(null)} onUpdate={u=>{onUpdate(u);setSel(u);}}/>}
-    </div>
-  );
+  const NavBtn=({id,ic,lb})=>(<button onClick={()=>setView(id)} style={{display:"flex",alignItems:"center",gap:10,padding:"11px 16px",margin:"2px 8px",background:view===id?"rgba(226,0,26,0.15)":"none",border:view===id?"1px solid rgba(226,0,26,0.3)":"1px solid transparent",borderRadius:8,color:view===id?"#e2001a":"#64748b",cursor:"pointer",fontWeight:600,fontSize:13,fontFamily:"inherit"}}>{ic} {lb}</button>);
+  const updateTicket=(u)=>{setTickets(p=>p.map(t=>t.id===u.id?u:t));setSel(u);};
+  return(<div style={{minHeight:"100vh",background:"#0b0f1a",display:"flex"}}><div style={{width:220,background:"#0f1520",borderRight:"1px solid #1e2a3a",display:"flex",flexDirection:"column",padding:"20px 0",flexShrink:0}}><div style={{padding:"0 16px 20px",borderBottom:"1px solid #1e2a3a",marginBottom:12}}><div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}><span>📡</span><span style={{color:"#e2001a",fontWeight:800,fontSize:15}}>IndiHome</span></div><div style={{color:"#64748b",fontSize:11}}>Ticket Management</div></div><NavBtn id="tickets" ic="🎫" lb="Tiket"/><NavBtn id="stats" ic="📊" lb="Statistik"/><div style={{flex:1}}/><div style={{padding:16,borderTop:"1px solid #1e2a3a"}}><div style={{background:"#1e2535",borderRadius:8,padding:12,marginBottom:10}}><div style={{color:"#e2e8f0",fontWeight:600,fontSize:13,marginBottom:2}}>{user.name}</div><div style={{color:"#e2001a",fontSize:11,fontWeight:700,textTransform:"uppercase"}}>{user.role==="ta"?"Admin TA":"Admin Branch"}</div><div style={{color:"#64748b",fontSize:11}}>{user.branch}</div></div><button onClick={onLogout} style={{width:"100%",padding:"8px",background:"none",border:"1px solid #2d3748",borderRadius:8,color:"#64748b",cursor:"pointer",fontSize:12,fontFamily:"inherit"}}>↩ Logout</button></div></div><div style={{flex:1,overflow:"auto",padding:24}}>{view==="stats"?(<div><h2 style={{color:"#e2e8f0",margin:"0 0 20px",fontSize:20}}>📊 Statistik Tiket</h2><div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:12,marginBottom:24}}>{[["Total",stats.total,"#e2e8f0"],["Baru",stats.baru,"#3b82f6"],["Diproses",stats.diproses,"#f59e0b"],["Dieskalasi",stats.dieskalasi,"#8b5cf6"],["Dikerjakan",stats.dikerjakan,"#f97316"],["Selesai",stats.selesai,"#22c55e"]].map(([l,v,c])=>(<div key={l} style={{background:"#151c2c",borderRadius:10,border:"1px solid #1e2a3a",padding:"14px 18px"}}><div style={{color:"#64748b",fontSize:11,fontWeight:600,textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>{l}</div><div style={{color:c,fontSize:28,fontWeight:900}}>{v}</div></div>))}</div><Card><div style={{color:"#94a3b8",fontSize:14}}>Tingkat penyelesaian: <strong style={{color:"#22c55e",fontSize:20}}>{stats.total?Math.round(stats.selesai/stats.total*100):0}%</strong></div></Card></div>):(<div><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20,flexWrap:"wrap",gap:12}}><h2 style={{color:"#e2e8f0",margin:0,fontSize:20}}>🎫 {user.role==="ta"?"Tiket Eskalasi":"Semua Tiket"} <span style={{color:"#64748b",fontSize:14,fontWeight:400}}>({filtered.length})</span></h2><div style={{display:"flex",gap:10,alignItems:"center"}}><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 Cari..." style={{padding:"9px 14px",borderRadius:8,border:"1.5px solid #2d3748",background:"#1e2535",color:"#e2e8f0",fontSize:13,fontFamily:"inherit",outline:"none",width:200}}/><Btn onClick={refresh} disabled={refreshing} v="secondary" sm>{refreshing?"⏳":"🔄"} Refresh</Btn></div></div><div style={{display:"flex",gap:6,marginBottom:16,flexWrap:"wrap"}}>{[["all","Semua",stats.total],...Object.entries(STATUS_CONFIG).map(([k,v])=>[k,v.label,stats[k]||0])].map(([k,l,n])=>(<button key={k} onClick={()=>setFilter(k)} style={{padding:"6px 14px",borderRadius:20,border:`1.5px solid ${filter===k?"#e2001a":"#2d3748"}`,background:filter===k?"rgba(226,0,26,0.15)":"transparent",color:filter===k?"#e2001a":"#64748b",cursor:"pointer",fontWeight:600,fontSize:12,fontFamily:"inherit"}}>{l} <span style={{background:"#1e2535",borderRadius:10,padding:"1px 6px",fontSize:10,marginLeft:4}}>{n}</span></button>))}</div><div style={{display:"grid",gridTemplateColumns:"130px 1fr 120px 90px 90px 80px",gap:12,padding:"8px 16px",marginBottom:4}}>{["ID TIKET","PELANGGAN","STO","PRIORITAS","STATUS","MASUK"].map(h=><div key={h} style={{color:"#64748b",fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5}}>{h}</div>)}</div>{filtered.length===0?<div style={{textAlign:"center",padding:40,color:"#64748b"}}>Tidak ada tiket</div>:filtered.map(t=>(<div key={t.id} onClick={()=>setSel(t)} style={{display:"grid",gridTemplateColumns:"130px 1fr 120px 90px 90px 80px",gap:12,alignItems:"center",padding:"12px 16px",borderRadius:8,border:"1px solid #1e2a3a",background:"#151c2c",cursor:"pointer",marginBottom:6}} onMouseEnter={e=>e.currentTarget.style.borderColor="#e2001a"} onMouseLeave={e=>e.currentTarget.style.borderColor="#1e2a3a"}><div style={{fontFamily:"monospace",fontSize:12,color:"#e2001a",fontWeight:700}}>{t.id}</div><div><div style={{color:"#e2e8f0",fontSize:14,fontWeight:600}}>{t.namaPlg}</div><div style={{color:"#64748b",fontSize:12}}>{t.masalah}</div></div><div style={{color:"#94a3b8",fontSize:12}}>{t.sto}</div><PBadge p={t.prioritas}/><Badge status={t.status}/><div style={{color:"#64748b",fontSize:11}}>{fmtDateShort(t.createdAt)}</div></div>))}</div>)}</div>{sel&&<TicketModal ticket={sel} user={user} onClose={()=>setSel(null)} onUpdate={updateTicket}/>}</div>);
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// ROOT APP
-// ══════════════════════════════════════════════════════════════════════════════
-function App() {
-  const [page,setPage]=useState("customer");
-  const [user,setUser]=useState(null);
-  const [tickets,setTickets]=useState([]);
-
+// ROOT
+function App(){
+  const [page,setPage]=useState("loading");const [user,setUser]=useState(null);const [tickets,setTickets]=useState([]);
   useEffect(()=>{
     const session=lsGet("ih_session",null);
-    const t=lsGet("ih_tickets",[]);
-    setTickets(t);
-    if(session?.id){setUser(session);setPage("dashboard");}
+    if(session?.id){setUser(session);api.get("getTickets").then(d=>{if(Array.isArray(d))setTickets(d);setPage("dashboard");});}
+    else setPage("customer");
   },[]);
-
-  const addTicket = t => {
-    const updated=[...tickets,t];setTickets(updated);lsSet("ih_tickets",updated);
-  };
-  const updateTicket = u => {
-    const next=tickets.map(t=>t.id===u.id?u:t);setTickets(next);lsSet("ih_tickets",next);
-  };
-  const logout = () => {
-    localStorage.removeItem("ih_session");setUser(null);setPage("customer");
-  };
-
-  if(page==="auth") return <AuthPage onLogin={u=>{setUser(u);setPage("dashboard");}} onBack={()=>setPage("customer")}/>;
-  if(page==="dashboard"&&user) return <Dashboard user={user} tickets={tickets} onUpdate={updateTicket} onLogout={logout}/>;
-  return <CustomerPortal onSubmit={addTicket} onGoAdmin={()=>setPage("auth")}/>;
+  const handleLogin=async(u)=>{setUser(u);const d=await api.get("getTickets");if(Array.isArray(d))setTickets(d);setPage("dashboard");};
+  const logout=()=>{localStorage.removeItem("ih_session");setUser(null);setTickets([]);setPage("customer");};
+  if(page==="loading")return <Spinner/>;
+  if(page==="auth")return <AuthPage onLogin={handleLogin} onBack={()=>setPage("customer")}/>;
+  if(page==="dashboard"&&user)return <Dashboard user={user} tickets={tickets} setTickets={setTickets} onLogout={logout}/>;
+  return <CustomerPortal onSubmit={t=>setTickets(p=>[...p,t])} onGoAdmin={()=>setPage("auth")}/>;
 }
-
-ReactDOM.render(<App/>, document.getElementById("root"));
+ReactDOM.render(<App/>,document.getElementById("root"));
 </script>
 </body>
 </html>
