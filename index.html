@@ -25,7 +25,7 @@
 const {useState,useEffect,useMemo,useRef,useCallback} = React;
 
 // ══ CONFIG ════════════════════════════════════════════════════
-const API_URL = "https://script.google.com/macros/s/AKfycbx6vOs2Kzbk-10X-axvbrx6pBnp0wx9RW039g2yRdN5FJcP8wfa5aVnf2SG8RlqjQji/exec";
+const API_URL = "PASTE_URL_APPS_SCRIPT_DISINI";
 
 const TICKET_FIELDS = [
   "id","namaPlg","emailPlg","noTelp","nomorInternet","alamat","sto",
@@ -429,7 +429,7 @@ function CustomerPortal({onSubmit,onGoAdmin}){
         </div>
         <div style={{background:"#fffbeb",border:"1px solid #fcd34d",borderRadius:10,padding:"12px 16px",marginBottom:20,textAlign:"left"}}>
           <div style={{color:"#92400e",fontSize:13,fontWeight:700,marginBottom:4}}>⚠️ Perhatian</div>
-          <div style={{color:"#78350f",fontSize:13,lineHeight:1.5}}>Pastikan perangkat <strong>ONT/Modem</strong> tersambung ke listrik dan semua lampu indikator menyala normal.</div>
+          <div style={{color:"#78350f",fontSize:13,lineHeight:1.5}}>Pastikan perangkat <strong>ONT/Modem</strong> tersambung ke listrik.</div>
         </div>
         <p style={{color:"#9ca3af",fontSize:13,marginBottom:20}}>Konfirmasi dikirim ke email Anda. Simpan nomor tiket untuk cek status.</p>
         <div style={{display:"flex",gap:10,justifyContent:"center",flexWrap:"wrap"}}>
@@ -704,7 +704,7 @@ function Dashboard({user,tickets,setTickets,onLogout}){
 
   const refresh=()=>doRefresh(false);
 
-  const myT=useMemo(()=>user.role==="ta"?tickets.filter(t=>["dieskalasi","dikerjakan","selesai"].includes(t.status)):tickets,[tickets,user.role]);
+  const myT=useMemo(()=>user.role==="ta"?tickets.filter(t=>["dieskalasi","dikerjakan"].includes(t.status)):tickets,[tickets,user.role]);
   const filtered=useMemo(()=>myT.filter(t=>{const ms=filterStatus==="all"||t.status===filterStatus;const mm=filterMasalah==="all"||t.masalah===filterMasalah;const ma=filterArea==="all"||t.sto===filterArea;const mq=!search||[t.id,t.namaPlg,t.masalah,t.sto,t.tiketTelkomsel,t.nomorInternet,t.alamat].some(v=>String(v||"").toLowerCase().includes(search.toLowerCase()));return ms&&mm&&ma&&mq;}).sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt)),[myT,filterStatus,filterMasalah,filterArea,search]);
   const stats=useMemo(()=>({total:myT.length,baru:myT.filter(t=>t.status==="baru").length,diproses:myT.filter(t=>t.status==="diproses").length,dikembalikan:myT.filter(t=>t.status==="dikembalikan").length,dieskalasi:myT.filter(t=>t.status==="dieskalasi").length,dikerjakan:myT.filter(t=>t.status==="dikerjakan").length,selesai:myT.filter(t=>t.status==="selesai").length}),[myT]);
 
