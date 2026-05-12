@@ -240,7 +240,7 @@ function CustomerPortal({onSubmit,onGoAdmin}){
             </div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
               <Inp label="Email" type="email" value={f.emailPlg} onChange={v=>sf("emailPlg",v)} required placeholder="nama@gmail.com" error={errors.emailPlg}/>
-              <Inp label="Nomor Internet / Pelanggan" value={f.nomorInternet} onChange={v=>sf("nomorInternet",v.replace(/[^0-9]/g,""))} placeholder="Opsional – angka saja" error={errors.nomorInternet}/>
+              <Inp label="Nomor Internet / Pelanggan" value={f.nomorInternet} onChange={v=>sf("nomorInternet",v.replace(/[^0-9]/g,""))} placeholder="1112345678" error={errors.nomorInternet}/>
             </div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
               <Sel label="Area" value={f.sto} onChange={v=>sf("sto",v)} options={AREA_LIST} required/>
