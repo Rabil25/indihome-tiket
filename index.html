@@ -7,6 +7,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
   body{font-family:'Segoe UI',Tahoma,Geneva,sans-serif;background:#f5f7fa}
@@ -14,17 +15,18 @@
   @keyframes spin{to{transform:rotate(360deg)}}
   @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
   .fade{animation:fadeIn 0.25s ease}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}
+  .pulse{animation:pulse 1.5s infinite}
 </style>
 </head>
 <body>
 <div id="root"></div>
 <script type="text/babel">
-const {useState,useEffect,useMemo,useCallback} = React;
+const {useState,useEffect,useMemo,useRef,useCallback} = React;
 
 // ══ CONFIG ════════════════════════════════════════════════════
 const API_URL = "https://script.google.com/macros/s/AKfycbx6vOs2Kzbk-10X-axvbrx6pBnp0wx9RW039g2yRdN5FJcP8wfa5aVnf2SG8RlqjQji/exec";
 
-// !! SAMA PERSIS DENGAN TICKET_HEADERS DI Code.gs !!
 const TICKET_FIELDS = [
   "id","namaPlg","emailPlg","noTelp","nomorInternet","alamat","sto",
   "masalah","prioritas","deskripsi","passwordLama","passwordBaru",
@@ -60,150 +62,344 @@ const STATUS_CONFIG = {
   selesai:      {label:"Selesai",      color:"#16a34a",bg:"#f0fdf4",icon:"✅"},
 };
 
+// SLA level: 0=fresh <1hr, 1=1day, 2=3day, 3=7day, 4=>7day
+const SLA_LEVELS = [
+  {key:"fresh",  label:"< 1 Hari",   color:"#16a34a", bg:"#f0fdf4", icon:"✅", min:0,   max:1},
+  {key:"day1",   label:"1–2 Hari",   color:"#d97706", bg:"#fffbeb", icon:"⚠️", min:1,   max:3},
+  {key:"day3",   label:"3–6 Hari",   color:"#ea580c", bg:"#fff7ed", icon:"🔴", min:3,   max:7},
+  {key:"day7",   label:"7 Hari",     color:"#dc2626", bg:"#fef2f2", icon:"🚨", min:7,   max:8},
+  {key:"over7",  label:"> 7 Hari",   color:"#7c3aed", bg:"#faf5ff", icon:"💀", min:8,   max:9999},
+];
+
 // ── Validasi ──────────────────────────────────────────────────
-const isValidEmail = e => {
-  if(!e) return false;
-  if(!/^[^\s@]+@[^\s@]+\.[a-zA-Z]{2,6}$/.test(e)) return false;
-  const tld=e.split('.').pop().toLowerCase();
-  if(['con','cok','cpm','gmal','gamil','gmil','yaho','yahooo','coml','comm'].includes(tld)) return false;
-  return !['gmali.com','gmaill.com','gamil.com','gnail.com','yhaoo.com','yahooo.com'].includes(e.split('@')[1]?.toLowerCase());
-};
-const isValidPhone  = p => /^[0-9]{9,15}$/.test(p.replace(/[\s\-\+]/g,''));
-const isValidNomor  = n => !n || /^[0-9]+$/.test(n.trim());
+const isValidEmail=e=>{if(!e)return false;if(!/^[^\s@]+@[^\s@]+\.[a-zA-Z]{2,6}$/.test(e))return false;const tld=e.split('.').pop().toLowerCase();if(['con','cok','cpm','gmal','gamil','gmil','yaho','yahooo','coml','comm'].includes(tld))return false;return !['gmali.com','gmaill.com','gamil.com','gnail.com','yhaoo.com','yahooo.com'].includes(e.split('@')[1]?.toLowerCase());};
+const isValidPhone=p=>/^[0-9]{9,15}$/.test(p.replace(/[\s\-\+]/g,''));
+const isValidNomor=n=>!n||/^[0-9]+$/.test(n.trim());
 
 // ── API ───────────────────────────────────────────────────────
-const api = {
-  get:  async a    => {try{const r=await fetch(`${API_URL}?action=${a}`);return r.json();}catch(e){return{error:e.message};}},
-  getQ: async(a,q) => {try{const r=await fetch(`${API_URL}?action=${a}&${q}`);return r.json();}catch(e){return{error:e.message};}},
-  post: async(a,d) => {try{const r=await fetch(API_URL,{method:"POST",body:JSON.stringify({action:a,data:d})});return r.json();}catch(e){return{error:e.message};}},
+const api={
+  get:  async a    =>{try{const r=await fetch(`${API_URL}?action=${a}`);return r.json();}catch(e){return{error:e.message};}},
+  getQ: async(a,q) =>{try{const r=await fetch(`${API_URL}?action=${a}&${q}`);return r.json();}catch(e){return{error:e.message};}},
+  post: async(a,d) =>{try{const r=await fetch(API_URL,{method:"POST",body:JSON.stringify({action:a,data:d})});return r.json();}catch(e){return{error:e.message};}},
 };
 
 // ── Utils ─────────────────────────────────────────────────────
 const genId=()=>{const d=new Date(),p=n=>String(n).padStart(2,"0");return `IH-${d.getFullYear().toString().slice(2)}${p(d.getMonth()+1)}${p(d.getDate())}-${Math.random().toString(36).slice(2,6).toUpperCase()}`;};
-const fmtDate=iso=>iso?new Date(iso).toLocaleString("id-ID",{timeZone:"Asia/Jakarta",day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"}):"-";
-const fmtShort=iso=>iso?new Date(iso).toLocaleString("id-ID",{timeZone:"Asia/Jakarta",day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"}):"-";
+const parseDate=val=>{if(!val||val==="")return null;const m=String(val).match(/(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})/);if(m){const d=new Date(`${m[1]}T${m[2]}+07:00`);return isNaN(d)?null:d;}const d=new Date(val);return isNaN(d)?null:d;};
+const fmtDate=iso=>{const d=parseDate(iso);return d?d.toLocaleString("id-ID",{timeZone:"Asia/Jakarta",day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"}):"-";};
+const fmtShort=iso=>{const d=parseDate(iso);return d?d.toLocaleString("id-ID",{timeZone:"Asia/Jakarta",day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"}):"-";};
+const fmtDay=d=>d.toLocaleDateString("id-ID",{timeZone:"Asia/Jakarta",day:"2-digit",month:"short"});
 const lsGet=(k,fb)=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):fb;}catch{return fb;}};
 const lsSet=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v));}catch{}};
+
+// SLA helper
+const getSLA=ticket=>{
+  if(ticket.status==="selesai") return null;
+  const created=parseDate(ticket.createdAt);
+  if(!created) return SLA_LEVELS[0];
+  const days=(Date.now()-created.getTime())/(1000*60*60*24);
+  return SLA_LEVELS.find(l=>days>=l.min&&days<l.max)||SLA_LEVELS[4];
+};
+const getDaysOpen=ticket=>{
+  const created=parseDate(ticket.createdAt);
+  if(!created) return 0;
+  return (Date.now()-created.getTime())/(1000*60*60*24);
+};
 
 // ── UI Atoms ──────────────────────────────────────────────────
 const Badge=({status})=>{const c=STATUS_CONFIG[status]||STATUS_CONFIG.baru;return <span style={{background:c.bg,color:c.color,border:`1px solid ${c.color}50`,borderRadius:20,padding:"3px 11px",fontSize:11,fontWeight:700,whiteSpace:"nowrap"}}>{c.icon} {c.label}</span>;};
 const PBadge=({p})=>{const c=PRIORITAS[p]||PRIORITAS.Sedang;return <span style={{background:c.bg,color:c.color,border:`1px solid ${c.color}50`,borderRadius:20,padding:"3px 11px",fontSize:11,fontWeight:700}}>{p}</span>;};
+const SLABadge=({ticket})=>{const s=getSLA(ticket);if(!s||s.key==="fresh")return null;return <span style={{background:s.bg,color:s.color,border:`1px solid ${s.color}50`,borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:700}}>{s.icon} {s.label}</span>;};
 const RoleBadge=({role})=>{const m={branch:{color:"#2563eb",label:"Admin Branch"},ta:{color:"#d97706",label:"Admin TA"},regulator:{color:"#7c3aed",label:"Regulator"}};const c=m[role]||m.branch;return <span style={{background:c.color+"15",color:c.color,border:`1px solid ${c.color}40`,borderRadius:20,padding:"3px 11px",fontSize:11,fontWeight:700}}>{c.label}</span>;};
 
 const iStyle=(err,bg="#fff")=>({width:"100%",padding:"10px 13px",borderRadius:8,border:`1.5px solid ${err?"#ef4444":"#d1d5db"}`,background:bg,color:"#1a1a2e",fontSize:14,fontFamily:"inherit",outline:"none"});
 const Inp=({label,value,onChange,type="text",placeholder="",required=false,rows=0,error="",bg="#fff",hint=""})=>(
   <div style={{display:"flex",flexDirection:"column",gap:4}}>
     <label style={{fontSize:12,fontWeight:700,color:"#374151",textTransform:"uppercase",letterSpacing:0.4}}>{label}{required&&<span style={{color:"#e2001a"}}> *</span>}</label>
-    {hint&&<span style={{fontSize:11,color:"#9ca3af",marginBottom:2}}>{hint}</span>}
-    {rows>0?<textarea rows={rows} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} style={{...iStyle(error,bg),resize:"vertical"}}/>
-            :<input type={type} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} style={iStyle(error,bg)}/>}
+    {hint&&<span style={{fontSize:11,color:"#9ca3af"}}>{hint}</span>}
+    {rows>0?<textarea rows={rows} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} style={{...iStyle(error,bg),resize:"vertical"}}/>:<input type={type} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} style={iStyle(error,bg)}/>}
     {error&&<span style={{color:"#ef4444",fontSize:11}}>⚠ {error}</span>}
   </div>
 );
 const Sel=({label,value,onChange,options,required=false,bg="#fff",placeholder="-- Pilih --"})=>(
   <div style={{display:"flex",flexDirection:"column",gap:4}}>
     <label style={{fontSize:12,fontWeight:700,color:"#374151",textTransform:"uppercase",letterSpacing:0.4}}>{label}{required&&<span style={{color:"#e2001a"}}> *</span>}</label>
-    <select value={value} onChange={e=>onChange(e.target.value)} style={{...iStyle(false,bg),color:value?"#1a1a2e":"#9ca3af"}}>
-      <option value="">{placeholder}</option>
-      {options.map(o=><option key={o} value={o}>{o}</option>)}
-    </select>
+    <select value={value} onChange={e=>onChange(e.target.value)} style={{...iStyle(false,bg),color:value?"#1a1a2e":"#9ca3af"}}><option value="">{placeholder}</option>{options.map(o=><option key={o} value={o}>{o}</option>)}</select>
   </div>
 );
 const Btn=({children,onClick,v="primary",disabled=false,sm=false,full=false})=>{
-  const S={primary:{background:"linear-gradient(135deg,#e2001a,#c0001a)",color:"#fff",border:"none",boxShadow:"0 2px 8px #e2001a25"},secondary:{background:"#fff",color:"#6b7280",border:"1.5px solid #d1d5db"},success:{background:"linear-gradient(135deg,#16a34a,#15803d)",color:"#fff",border:"none",boxShadow:"0 2px 8px #16a34a25"},purple:{background:"linear-gradient(135deg,#7c3aed,#6d28d9)",color:"#fff",border:"none"},danger:{background:"linear-gradient(135deg,#dc2626,#b91c1c)",color:"#fff",border:"none"},orange:{background:"linear-gradient(135deg,#ea580c,#c2410c)",color:"#fff",border:"none"},warn:{background:"linear-gradient(135deg,#d97706,#b45309)",color:"#fff",border:"none"},ghost:{background:"transparent",color:"#e2001a",border:"1.5px solid #e2001a"}};
-  return <button onClick={onClick} disabled={disabled} style={{...S[v],padding:sm?"6px 13px":"10px 20px",borderRadius:8,cursor:disabled?"not-allowed":"pointer",fontWeight:700,fontSize:sm?12:14,fontFamily:"inherit",opacity:disabled?0.6:1,whiteSpace:"nowrap",width:full?"100%":"auto",transition:"opacity 0.15s"}}>{children}</button>;
+  const S={primary:{background:"linear-gradient(135deg,#e2001a,#c0001a)",color:"#fff",border:"none",boxShadow:"0 2px 8px #e2001a25"},secondary:{background:"#fff",color:"#6b7280",border:"1.5px solid #d1d5db"},success:{background:"linear-gradient(135deg,#16a34a,#15803d)",color:"#fff",border:"none"},purple:{background:"linear-gradient(135deg,#7c3aed,#6d28d9)",color:"#fff",border:"none"},danger:{background:"linear-gradient(135deg,#dc2626,#b91c1c)",color:"#fff",border:"none"},orange:{background:"linear-gradient(135deg,#ea580c,#c2410c)",color:"#fff",border:"none"},warn:{background:"linear-gradient(135deg,#d97706,#b45309)",color:"#fff",border:"none"},ghost:{background:"transparent",color:"#e2001a",border:"1.5px solid #e2001a"}};
+  return <button onClick={onClick} disabled={disabled} style={{...S[v],padding:sm?"6px 13px":"10px 20px",borderRadius:8,cursor:disabled?"not-allowed":"pointer",fontWeight:700,fontSize:sm?12:14,fontFamily:"inherit",opacity:disabled?0.6:1,whiteSpace:"nowrap",width:full?"100%":"auto"}}>{children}</button>;
 };
 const Card=({children,style={}})=><div style={{background:"#fff",borderRadius:14,border:"1px solid #e5e7eb",padding:24,boxShadow:"0 1px 6px rgba(0,0,0,0.05)",...style}}>{children}</div>;
 const Spinner=()=>(<div style={{minHeight:"100vh",background:"#f5f7fa",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:16}}><div style={{width:40,height:40,border:"4px solid #e5e7eb",borderTop:"4px solid #e2001a",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/><div style={{color:"#6b7280",fontSize:14}}>Memuat data...</div></div>);
 const Logo=({height=44})=>(<img src="./logo-indihome.png" alt="IndiHome" style={{height,objectFit:"contain",display:"block"}} onError={e=>{e.target.style.display="none";const d=document.createElement("span");d.innerHTML=`<span style="font-size:${Math.round(height*0.45)}px;font-weight:900;color:#e2001a">📡 IndiHome</span>`;e.target.parentNode.insertBefore(d,e.target.nextSibling);}}/>);
 
+// ── Chart Component ───────────────────────────────────────────
+const ChartBox=({type,data,options={},title,height=280})=>{
+  const canvasRef=useRef(null);
+  const chartRef=useRef(null);
+  useEffect(()=>{
+    if(!canvasRef.current||!window.Chart) return;
+    if(chartRef.current) chartRef.current.destroy();
+    chartRef.current=new window.Chart(canvasRef.current,{
+      type,data,
+      options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{font:{size:11},padding:16}}},animation:{duration:400},...options}
+    });
+    return()=>{if(chartRef.current)chartRef.current.destroy();};
+  },[JSON.stringify(data)]);
+  return(
+    <Card style={{padding:20}}>
+      <div style={{color:"#1a1a2e",fontSize:14,fontWeight:700,marginBottom:16}}>{title}</div>
+      <div style={{height,position:"relative"}}><canvas ref={canvasRef}/></div>
+    </Card>
+  );
+};
+
+// ══════════════════════════════════════════════════════════════
+// SLA VIEW
+// ══════════════════════════════════════════════════════════════
+function SLAView({tickets,onSelectTicket}){
+  const open = tickets.filter(t=>t.status!=="selesai");
+
+  const groups = SLA_LEVELS.map(lv=>({
+    ...lv,
+    items: open.filter(t=>{const d=getDaysOpen(t);return d>=lv.min&&d<lv.max;})
+      .sort((a,b)=>getDaysOpen(b)-getDaysOpen(a))
+  }));
+
+  const urgent = groups.filter(g=>g.key!=="fresh");
+  const totalOpen = open.length;
+  const totalOverdue = groups.find(g=>g.key==="over7")?.items.length||0;
+
+  return(
+    <div className="fade">
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20,flexWrap:"wrap",gap:12}}>
+        <h2 style={{color:"#1a1a2e",fontSize:22,fontWeight:800}}>⏱ SLA Monitoring</h2>
+        <div style={{fontSize:13,color:"#6b7280"}}>Total tiket belum selesai: <strong style={{color:"#1a1a2e"}}>{totalOpen}</strong> {totalOverdue>0&&<span style={{color:"#7c3aed",fontWeight:700}}> · {totalOverdue} melebihi 7 hari!</span>}</div>
+      </div>
+
+      {/* Summary cards */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:12,marginBottom:28}}>
+        {groups.map(g=>(
+          <div key={g.key} style={{background:g.bg,borderRadius:12,border:`1.5px solid ${g.color}30`,padding:"14px 16px",textAlign:"center"}}>
+            <div style={{fontSize:24,marginBottom:4}}>{g.icon}</div>
+            <div style={{color:g.color,fontSize:28,fontWeight:900,lineHeight:1}}>{g.items.length}</div>
+            <div style={{color:g.color,fontSize:11,fontWeight:700,marginTop:4,opacity:0.8}}>{g.label}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Ticket groups */}
+      {urgent.map(g=>(
+        g.items.length>0&&(
+          <div key={g.key} style={{marginBottom:24}}>
+            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
+              <div style={{background:g.bg,border:`1.5px solid ${g.color}40`,borderRadius:8,padding:"6px 14px",display:"flex",alignItems:"center",gap:6}}>
+                <span style={{fontSize:16}}>{g.icon}</span>
+                <span style={{color:g.color,fontWeight:700,fontSize:13}}>{g.label}</span>
+                <span style={{background:g.color,color:"#fff",borderRadius:10,padding:"1px 7px",fontSize:11,fontWeight:700,marginLeft:4}}>{g.items.length}</span>
+              </div>
+              {g.key==="over7"&&<span className="pulse" style={{color:"#7c3aed",fontSize:12,fontWeight:700}}>⚠️ PERLU TINDAKAN SEGERA</span>}
+            </div>
+
+            <div style={{background:"#fff",borderRadius:12,border:`1.5px solid ${g.color}30`,overflow:"hidden",boxShadow:"0 1px 4px rgba(0,0,0,0.04)"}}>
+              <div style={{display:"grid",gridTemplateColumns:"110px 1fr 80px 80px 90px 90px",gap:8,padding:"8px 14px",background:g.bg,borderBottom:`1px solid ${g.color}20`}}>
+                {["ID TIKET","PELANGGAN / MASALAH","AREA","PRIORITAS","STATUS","LAMA BUKA"].map(h=><div key={h} style={{color:g.color,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,opacity:0.8}}>{h}</div>)}
+              </div>
+              {g.items.map((t,i)=>{
+                const days=getDaysOpen(t);
+                return(
+                  <div key={t.id} onClick={()=>onSelectTicket(t)}
+                    style={{display:"grid",gridTemplateColumns:"110px 1fr 80px 80px 90px 90px",gap:8,alignItems:"center",padding:"11px 14px",borderBottom:i<g.items.length-1?"1px solid #f3f4f6":"none",cursor:"pointer"}}
+                    onMouseEnter={e=>e.currentTarget.style.background=g.bg}
+                    onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                    <div style={{fontFamily:"monospace",fontSize:11,color:"#e2001a",fontWeight:700}}>{t.id}</div>
+                    <div>
+                      <div style={{color:"#1a1a2e",fontSize:13,fontWeight:600}}>{t.namaPlg}</div>
+                      <div style={{color:"#6b7280",fontSize:11}}>{t.masalah}</div>
+                    </div>
+                    <div style={{color:"#6b7280",fontSize:11}}>{t.sto}</div>
+                    <PBadge p={t.prioritas}/>
+                    <Badge status={t.status}/>
+                    <div style={{color:g.color,fontWeight:700,fontSize:12}}>
+                      {days<1?`${Math.round(days*24)}j`:days<2?`${Math.floor(days)}h ${Math.round((days%1)*24)}j`:`${Math.floor(days)} hari`}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )
+      ))}
+
+      {urgent.every(g=>g.items.length===0)&&(
+        <Card style={{textAlign:"center",padding:40}}>
+          <div style={{fontSize:48,marginBottom:12}}>🎉</div>
+          <div style={{color:"#16a34a",fontSize:16,fontWeight:700}}>Semua tiket dalam SLA normal!</div>
+          <div style={{color:"#9ca3af",fontSize:13,marginTop:6}}>Tidak ada tiket yang terlambat.</div>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════
+// GRAFIK VIEW
+// ══════════════════════════════════════════════════════════════
+function GrafikView({tickets}){
+  const CHART_COLORS=['#e2001a','#2563eb','#16a34a','#d97706','#7c3aed','#ea580c','#0891b2','#db2777','#65a30d','#9333ea','#0284c7','#c2410c','#15803d','#b45309','#6d28d9'];
+
+  // 1. Tren per hari (14 hari terakhir)
+  const trendData = useMemo(()=>{
+    const days=[];const labels=[];
+    for(let i=13;i>=0;i--){
+      const d=new Date();d.setDate(d.getDate()-i);
+      labels.push(fmtDay(d));
+      const dateStr=d.toLocaleDateString("id-ID",{timeZone:"Asia/Jakarta",year:"numeric",month:"2-digit",day:"2-digit"});
+      const [dd,mm,yyyy]=dateStr.split("/");
+      const ymd=`${yyyy}-${mm}-${dd}`;
+      days.push(tickets.filter(t=>{
+        const cd=parseDate(t.createdAt);
+        if(!cd) return false;
+        const tStr=cd.toLocaleDateString("id-ID",{timeZone:"Asia/Jakarta",year:"numeric",month:"2-digit",day:"2-digit"});
+        const [tdd,tmm,tyyyy]=tStr.split("/");
+        return `${tyyyy}-${tmm}-${tdd}`===ymd;
+      }).length);
+    }
+    return {
+      labels,
+      datasets:[{
+        label:"Tiket Masuk",
+        data:days,
+        borderColor:"#e2001a",
+        backgroundColor:"rgba(226,0,26,0.1)",
+        fill:true,
+        tension:0.4,
+        pointBackgroundColor:"#e2001a",
+        pointRadius:4,
+      }]
+    };
+  },[tickets]);
+
+  const trendOptions={scales:{y:{beginAtZero:true,ticks:{stepSize:1},grid:{color:"#f3f4f6"}},x:{grid:{display:false}}},plugins:{legend:{display:false}}};
+
+  // 2. Per area
+  const areaData = useMemo(()=>{
+    const counts=AREA_LIST.map(a=>tickets.filter(t=>t.sto===a).length);
+    return {
+      labels:AREA_LIST,
+      datasets:[{
+        label:"Jumlah Tiket",
+        data:counts,
+        backgroundColor:AREA_LIST.map((_,i)=>CHART_COLORS[i%CHART_COLORS.length]+"cc"),
+        borderColor:AREA_LIST.map((_,i)=>CHART_COLORS[i%CHART_COLORS.length]),
+        borderWidth:1,
+        borderRadius:6,
+      }]
+    };
+  },[tickets]);
+
+  const areaOptions={indexAxis:'y',scales:{x:{beginAtZero:true,ticks:{stepSize:1},grid:{color:"#f3f4f6"}},y:{grid:{display:false},ticks:{font:{size:11}}}},plugins:{legend:{display:false}}};
+
+  // 3. Per masalah (doughnut)
+  const masalahData = useMemo(()=>{
+    const counts=MASALAH_LIST.map(m=>tickets.filter(t=>t.masalah===m).length);
+    return {
+      labels:MASALAH_LIST.map(m=>m.length>28?m.slice(0,28)+"...":m),
+      datasets:[{data:counts,backgroundColor:CHART_COLORS.slice(0,MASALAH_LIST.length).map(c=>c+"cc"),borderColor:"#fff",borderWidth:2,hoverOffset:6}]
+    };
+  },[tickets]);
+
+  // 4. Status breakdown (doughnut)
+  const statusData = useMemo(()=>{
+    const keys=Object.keys(STATUS_CONFIG);
+    const counts=keys.map(k=>tickets.filter(t=>t.status===k).length);
+    const colors={baru:"#2563eb",diproses:"#d97706",dikembalikan:"#dc2626",dieskalasi:"#7c3aed",dikerjakan:"#ea580c",selesai:"#16a34a"};
+    return {
+      labels:keys.map(k=>STATUS_CONFIG[k].label),
+      datasets:[{data:counts,backgroundColor:keys.map(k=>(colors[k]||"#888")+"cc"),borderColor:"#fff",borderWidth:2,hoverOffset:6}]
+    };
+  },[tickets]);
+
+  // 5. Stats summary
+  const today=tickets.filter(t=>{const d=parseDate(t.createdAt);if(!d)return false;const now=new Date();return d.toDateString()===now.toDateString();}).length;
+  const thisWeek=tickets.filter(t=>{const d=parseDate(t.createdAt);if(!d)return false;return (Date.now()-d.getTime())<7*24*60*60*1000;}).length;
+  const selesaiToday=tickets.filter(t=>{if(t.status!=="selesai")return false;const d=parseDate(t.resolvedAt);if(!d)return false;const now=new Date();return d.toDateString()===now.toDateString();}).length;
+  const avgRes=()=>{const done=tickets.filter(t=>t.status==="selesai"&&t.resolvedAt&&t.createdAt);if(!done.length)return"-";const avg=done.reduce((s,t)=>{const c=parseDate(t.createdAt),r=parseDate(t.resolvedAt);return s+(r&&c?(r-c)/3600000:0);},0)/done.length;return avg<24?`${Math.round(avg)} jam`:`${Math.round(avg/24)} hari`;};
+
+  return(
+    <div className="fade">
+      <h2 style={{color:"#1a1a2e",fontSize:22,fontWeight:800,marginBottom:20}}>📈 Grafik & Analitik</h2>
+
+      {/* KPI Cards */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:12,marginBottom:24}}>
+        {[["📥 Masuk Hari Ini",today,"#2563eb","#eff6ff"],["📅 7 Hari Terakhir",thisWeek,"#7c3aed","#faf5ff"],["✅ Selesai Hari Ini",selesaiToday,"#16a34a","#f0fdf4"],["⏱ Rata-rata Penyelesaian",avgRes(),"#d97706","#fffbeb"],["📋 Total Semua",tickets.length,"#1a1a2e","#f9fafb"]].map(([l,v,c,bg])=>(
+          <div key={l} style={{background:bg,borderRadius:12,border:`1px solid ${c}20`,padding:"14px 16px"}}>
+            <div style={{color:c,fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,marginBottom:6,opacity:0.8}}>{l}</div>
+            <div style={{color:c,fontSize:26,fontWeight:900}}>{v}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Charts grid */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:16}}>
+        <div style={{gridColumn:"1/-1"}}>
+          <ChartBox type="line" data={trendData} options={trendOptions} title="📅 Tren Tiket Masuk (14 Hari Terakhir)" height={240}/>
+        </div>
+        <ChartBox type="bar" data={areaData} options={areaOptions} title="🗺️ Tiket per Area" height={320}/>
+        <div style={{display:"flex",flexDirection:"column",gap:16}}>
+          <ChartBox type="doughnut" data={masalahData} title="🔧 Jenis Masalah" height={220}/>
+          <ChartBox type="doughnut" data={statusData} title="📊 Distribusi Status" height={220}/>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ══════════════════════════════════════════════════════════════
 // CEK STATUS TIKET
 // ══════════════════════════════════════════════════════════════
 function CekTiket(){
-  const [input,setInput]=useState("");
-  const [result,setResult]=useState(null);
-  const [loading,setLoading]=useState(false);
-  const [err,setErr]=useState("");
-
-  const cek=async()=>{
-    if(!input.trim()){setErr("Masukkan nomor tiket");return;}
-    setLoading(true);setErr("");setResult(null);
-    const res=await api.getQ("getTicket",`id=${encodeURIComponent(input.trim().toUpperCase())}`);
-    if(res.error){setErr("Tiket tidak ditemukan. Pastikan nomor tiket sudah benar.");setResult(null);}
-    else setResult(res.ticket);
-    setLoading(false);
-  };
-
-  const sc=STATUS_CONFIG[result?.status]||STATUS_CONFIG.baru;
-  const timeline=[
-    {st:"baru",label:"Laporan Diterima",done:true},
-    {st:"diproses",label:"Sedang Diproses",done:result&&result.status!=="baru"},
-    {st:"dieskalasi",label:"Dieskalasi ke TA",done:result&&["dieskalasi","dikerjakan","selesai"].includes(result.status)},
-    {st:"dikerjakan",label:"Teknisi Bekerja",done:result&&["dikerjakan","selesai"].includes(result.status)},
-    {st:"selesai",label:"Selesai",done:result&&result.status==="selesai"},
-  ];
-
+  const [input,setInput]=useState("");const [result,setResult]=useState(null);const [loading,setLoading]=useState(false);const [err,setErr]=useState("");
+  const cek=async()=>{if(!input.trim()){setErr("Masukkan nomor tiket");return;}setLoading(true);setErr("");setResult(null);const res=await api.getQ("getTicket",`id=${encodeURIComponent(input.trim().toUpperCase())}`);if(res.error){setErr("Tiket tidak ditemukan. Pastikan nomor tiket sudah benar.");}else setResult(res.ticket);setLoading(false);};
+  const timeline=[{label:"Laporan Diterima",done:true},{label:"Sedang Diproses",done:result&&result.status!=="baru"},{label:"Dieskalasi ke TA",done:result&&["dieskalasi","dikerjakan","selesai"].includes(result.status)},{label:"Teknisi Bekerja",done:result&&["dikerjakan","selesai"].includes(result.status)},{label:"Selesai",done:result&&result.status==="selesai"}];
   return(
     <div className="fade">
       <Card style={{marginBottom:20}}>
         <h3 style={{color:"#1a1a2e",fontSize:16,fontWeight:700,marginBottom:12}}>🔍 Cek Status Tiket</h3>
         <div style={{display:"flex",gap:10}}>
-          <input value={input} onChange={e=>setInput(e.target.value.toUpperCase())}
-            onKeyDown={e=>e.key==="Enter"&&cek()}
-            placeholder="Masukkan nomor tiket (cth: IH-250512-AB12)"
-            style={{...iStyle(err),flex:1,textTransform:"uppercase",fontFamily:"monospace",letterSpacing:1}}/>
-          <Btn onClick={cek} disabled={loading}>{loading?"⏳ Mencari...":"🔍 Cek"}</Btn>
+          <input value={input} onChange={e=>setInput(e.target.value.toUpperCase())} onKeyDown={e=>e.key==="Enter"&&cek()} placeholder="Masukkan nomor tiket (cth: IH-250512-AB12)" style={{...iStyle(err),flex:1,fontFamily:"monospace",letterSpacing:1,textTransform:"uppercase"}}/>
+          <Btn onClick={cek} disabled={loading}>{loading?"⏳":"🔍 Cek"}</Btn>
         </div>
         {err&&<div style={{color:"#dc2626",fontSize:13,marginTop:8}}>⚠ {err}</div>}
       </Card>
-
       {result&&(
         <Card className="fade">
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:12,marginBottom:20}}>
-            <div>
-              <div style={{color:"#9ca3af",fontSize:11,fontWeight:600,marginBottom:4}}>NOMOR TIKET</div>
-              <div style={{color:"#e2001a",fontSize:20,fontWeight:900,fontFamily:"monospace",letterSpacing:2}}>{result.id}</div>
-            </div>
+            <div><div style={{color:"#9ca3af",fontSize:11,fontWeight:600,marginBottom:4}}>NOMOR TIKET</div><div style={{color:"#e2001a",fontSize:20,fontWeight:900,fontFamily:"monospace",letterSpacing:2}}>{result.id}</div></div>
             <Badge status={result.status}/>
           </div>
-
-          {/* Timeline */}
           {result.status!=="dikembalikan"&&(
             <div style={{display:"flex",alignItems:"center",marginBottom:20,overflowX:"auto",paddingBottom:4}}>
               {timeline.map((t,i)=>(
-                <React.Fragment key={t.st}>
+                <React.Fragment key={i}>
                   <div style={{display:"flex",flexDirection:"column",alignItems:"center",minWidth:80}}>
-                    <div style={{width:28,height:28,borderRadius:"50%",background:t.done?"#e2001a":"#e5e7eb",color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,fontWeight:700,flexShrink:0}}>{t.done?"✓":""}</div>
+                    <div style={{width:28,height:28,borderRadius:"50%",background:t.done?"#e2001a":"#e5e7eb",color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,fontWeight:700}}>{t.done?"✓":""}</div>
                     <div style={{color:t.done?"#1a1a2e":"#9ca3af",fontSize:10,fontWeight:t.done?700:400,marginTop:4,textAlign:"center",lineHeight:1.3}}>{t.label}</div>
                   </div>
-                  {i<timeline.length-1&&<div style={{flex:1,height:2,background:timeline[i+1].done?"#e2001a":"#e5e7eb",minWidth:16,flexShrink:1}}/>}
+                  {i<timeline.length-1&&<div style={{flex:1,height:2,background:timeline[i+1].done?"#e2001a":"#e5e7eb",minWidth:16}}/>}
                 </React.Fragment>
               ))}
             </div>
           )}
-
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
             {[["👤 Pelanggan",result.namaPlg],["🗺️ Area",result.sto],["🔧 Masalah",result.masalah],["📅 Dilaporkan",fmtDate(result.createdAt)],["🕐 Diperbarui",fmtDate(result.updatedAt)],result.resolvedAt&&["✅ Selesai",fmtDate(result.resolvedAt)]].filter(Boolean).map(([k,v])=>(
-              <div key={k} style={{background:"#f9fafb",borderRadius:8,padding:"10px 14px",border:"1px solid #f0f0f0"}}>
-                <div style={{color:"#9ca3af",fontSize:10,fontWeight:700,marginBottom:4}}>{k}</div>
-                <div style={{color:"#1a1a2e",fontSize:13,fontWeight:600}}>{v}</div>
-              </div>
+              <div key={k} style={{background:"#f9fafb",borderRadius:8,padding:"10px 14px",border:"1px solid #f0f0f0"}}><div style={{color:"#9ca3af",fontSize:10,fontWeight:700,marginBottom:4}}>{k}</div><div style={{color:"#1a1a2e",fontSize:13,fontWeight:600}}>{v}</div></div>
             ))}
           </div>
-
-          {result.catatanBranch&&(
-            <div style={{marginTop:12,background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:8,padding:"10px 14px"}}>
-              <div style={{color:"#166534",fontSize:10,fontWeight:700,marginBottom:4}}>📝 KETERANGAN PENANGANAN</div>
-              <div style={{color:"#374151",fontSize:13}}>{result.catatanBranch}</div>
-            </div>
-          )}
-          {result.alasanRollback&&(
-            <div style={{marginTop:12,background:"#fef2f2",border:"1px solid #fecaca",borderRadius:8,padding:"10px 14px"}}>
-              <div style={{color:"#dc2626",fontSize:10,fontWeight:700,marginBottom:4}}>↩️ CATATAN ROLLBACK</div>
-              <div style={{color:"#374151",fontSize:13}}>{result.alasanRollback}</div>
-            </div>
-          )}
+          {result.catatanBranch&&<div style={{marginTop:12,background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:8,padding:"10px 14px"}}><div style={{color:"#166534",fontSize:10,fontWeight:700,marginBottom:4}}>📝 KETERANGAN</div><div style={{color:"#374151",fontSize:13}}>{result.catatanBranch}</div></div>}
+          {result.alasanRollback&&<div style={{marginTop:12,background:"#fef2f2",border:"1px solid #fecaca",borderRadius:8,padding:"10px 14px"}}><div style={{color:"#dc2626",fontSize:10,fontWeight:700,marginBottom:4}}>↩️ CATATAN ROLLBACK</div><div style={{color:"#374151",fontSize:13}}>{result.alasanRollback}</div></div>}
         </Card>
       )}
     </div>
@@ -214,50 +410,14 @@ function CekTiket(){
 // CUSTOMER PORTAL
 // ══════════════════════════════════════════════════════════════
 function CustomerPortal({onSubmit,onGoAdmin}){
-  const [tab,setTab]=useState("lapor"); // lapor | cek
+  const [tab,setTab]=useState("lapor");
   const blank={namaPlg:"",emailPlg:"",noTelp:"",nomorInternet:"",alamat:"",sto:"",masalah:"",prioritas:"Sedang",deskripsi:"",passwordLama:"",passwordBaru:""};
-  const [f,setF]=useState(blank);
-  const [errors,setErrors]=useState({});
-  const [done,setDone]=useState(null);
-  const [loading,setLoading]=useState(false);
-  const sf=(k,v)=>setF(p=>({...p,[k]:v}));
-  const isGantiPwd=f.masalah==="Ganti Password WiFi";
+  const [f,setF]=useState(blank);const [errors,setErrors]=useState({});const [done,setDone]=useState(null);const [loading,setLoading]=useState(false);
+  const sf=(k,v)=>setF(p=>({...p,[k]:v}));const isGantiPwd=f.masalah==="Ganti Password WiFi";
+  const validate=()=>{const e={};if(!f.namaPlg.trim())e.namaPlg="Nama wajib diisi";if(!f.emailPlg.trim())e.emailPlg="Email wajib diisi";else if(!isValidEmail(f.emailPlg))e.emailPlg="Format email tidak valid";if(!f.noTelp.trim())e.noTelp="No. telepon wajib diisi";else if(!isValidPhone(f.noTelp))e.noTelp="Harus angka, 9–15 digit";if(!f.nomorInternet.trim())e.nomorInternet="Nomor internet wajib diisi";else if(!isValidNomor(f.nomorInternet))e.nomorInternet="Harus berupa angka";if(!f.alamat.trim())e.alamat="Alamat wajib diisi";if(!f.sto)e.sto="Area wajib dipilih";if(!f.masalah)e.masalah="Jenis masalah wajib dipilih";if(!f.deskripsi.trim())e.deskripsi="Deskripsi wajib diisi";if(isGantiPwd){if(!f.passwordLama.trim())e.passwordLama="Password lama wajib diisi";if(!f.passwordBaru.trim())e.passwordBaru="Password baru wajib diisi";else if(f.passwordBaru.length<8)e.passwordBaru="Minimal 8 karakter";}return e;};
+  const submit=async()=>{const errs=validate();if(Object.keys(errs).length>0){setErrors(errs);return;}setLoading(true);setErrors({});const now=new Date().toISOString();const t={...f,id:genId(),status:"baru",createdAt:now,updatedAt:now,tiketTelkomsel:"",teknisi:"",catatanTA:"",catatanBranch:"",alasanRollback:"",resolvedAt:"",adminBranch:""};const res=await api.post("addTicket",t);if(res.success){setDone(t.id);onSubmit(t);}else alert("Gagal: "+(res.error||"Cek koneksi & URL API"));setLoading(false);};
 
-  const validate=()=>{
-    const e={};
-    if(!f.namaPlg.trim())  e.namaPlg="Nama wajib diisi";
-    if(!f.emailPlg.trim()) e.emailPlg="Email wajib diisi";
-    else if(!isValidEmail(f.emailPlg)) e.emailPlg="Format email tidak valid (contoh: nama@gmail.com)";
-    if(!f.noTelp.trim())   e.noTelp="No. telepon wajib diisi";
-    else if(!isValidPhone(f.noTelp)) e.noTelp="Harus angka, 9–15 digit";
-    if(!f.nomorInternet.trim()) e.nomorInternet="Nomor internet wajib diisi";
-    else if(!isValidNomor(f.nomorInternet)) e.nomorInternet="Harus berupa angka";
-    if(!f.alamat.trim())   e.alamat="Alamat wajib diisi";
-    if(!f.sto)             e.sto="Area wajib dipilih";
-    if(!f.masalah)         e.masalah="Jenis masalah wajib dipilih";
-    if(!f.deskripsi.trim()) e.deskripsi="Deskripsi wajib diisi";
-    if(isGantiPwd){
-      if(!f.passwordLama.trim()) e.passwordLama="Password lama wajib diisi";
-      if(!f.passwordBaru.trim()) e.passwordBaru="Password baru wajib diisi";
-      else if(f.passwordBaru.length<8) e.passwordBaru="Password baru minimal 8 karakter";
-    }
-    return e;
-  };
-
-  const submit=async()=>{
-    const errs=validate();
-    if(Object.keys(errs).length>0){setErrors(errs);return;}
-    setLoading(true);setErrors({});
-    const now=new Date().toISOString();
-    const t={...f,id:genId(),status:"baru",createdAt:now,updatedAt:now,
-      tiketTelkomsel:"",teknisi:"",catatanTA:"",catatanBranch:"",alasanRollback:"",resolvedAt:"",adminBranch:""};
-    const res=await api.post("addTicket",t);
-    if(res.success){setDone(t.id);onSubmit(t);}
-    else alert("Gagal: "+(res.error||"Cek koneksi & URL API"));
-    setLoading(false);
-  };
-
-  if(done) return(
+  if(done)return(
     <div style={{minHeight:"100vh",background:"#fff",display:"flex",alignItems:"center",justifyContent:"center",padding:24}}>
       <Card style={{maxWidth:500,width:"100%",textAlign:"center",padding:40}}>
         <div style={{fontSize:60,marginBottom:16}}>✅</div>
@@ -267,12 +427,11 @@ function CustomerPortal({onSubmit,onGoAdmin}){
           <div style={{color:"#9ca3af",fontSize:12,fontWeight:600,marginBottom:6}}>NOMOR TIKET ANDA</div>
           <div style={{color:"#e2001a",fontSize:26,fontWeight:900,letterSpacing:3,fontFamily:"monospace"}}>{done}</div>
         </div>
-        {/* Keterangan ONT */}
         <div style={{background:"#fffbeb",border:"1px solid #fcd34d",borderRadius:10,padding:"12px 16px",marginBottom:20,textAlign:"left"}}>
           <div style={{color:"#92400e",fontSize:13,fontWeight:700,marginBottom:4}}>⚠️ Perhatian</div>
           <div style={{color:"#78350f",fontSize:13,lineHeight:1.5}}>Pastikan perangkat <strong>ONT/Modem</strong> tersambung ke listrik dan semua lampu indikator menyala normal.</div>
         </div>
-        <p style={{color:"#9ca3af",fontSize:13,marginBottom:24}}>Konfirmasi dikirim ke email Anda. Simpan nomor tiket untuk cek status.</p>
+        <p style={{color:"#9ca3af",fontSize:13,marginBottom:20}}>Konfirmasi dikirim ke email Anda. Simpan nomor tiket untuk cek status.</p>
         <div style={{display:"flex",gap:10,justifyContent:"center",flexWrap:"wrap"}}>
           <Btn onClick={()=>{setDone(null);setF(blank);}}>+ Laporan Baru</Btn>
           <Btn onClick={()=>{setDone(null);setF(blank);setTab("cek");}} v="ghost">🔍 Cek Status</Btn>
@@ -283,59 +442,37 @@ function CustomerPortal({onSubmit,onGoAdmin}){
 
   return(
     <div style={{minHeight:"100vh",background:"#fff"}}>
-      {/* Topbar */}
       <div style={{background:"#fff",borderBottom:"1px solid #f0f0f0",padding:"12px 24px",display:"flex",justifyContent:"space-between",alignItems:"center",boxShadow:"0 1px 4px rgba(0,0,0,0.05)",position:"sticky",top:0,zIndex:10}}>
-        <Logo height={38}/>
-        <button onClick={onGoAdmin} style={{background:"none",border:"1.5px solid #e2001a",color:"#e2001a",cursor:"pointer",fontWeight:700,fontSize:13,padding:"7px 16px",borderRadius:8,fontFamily:"inherit"}}>🔐 Login Admin</button>
+        <Logo height={38}/><button onClick={onGoAdmin} style={{background:"none",border:"1.5px solid #e2001a",color:"#e2001a",cursor:"pointer",fontWeight:700,fontSize:13,padding:"7px 16px",borderRadius:8,fontFamily:"inherit"}}>🔐 Login Admin</button>
       </div>
-
       <div style={{maxWidth:660,margin:"0 auto",padding:"28px 16px 48px"}}>
-        {/* Hero */}
         <div style={{textAlign:"center",marginBottom:28}}>
-          <div style={{display:"flex",justifyContent:"center",marginBottom:18}}>
-            <Logo height={80}/>
-          </div>
+          <div style={{display:"flex",justifyContent:"center",marginBottom:18}}><Logo height={80}/></div>
           <h1 style={{color:"#1a1a2e",fontSize:26,fontWeight:800,margin:"0 0 8px"}}>Pusat Layanan Pelanggan</h1>
           <p style={{color:"#6b7280",fontSize:14}}>WOK Lampung – IndiHome by Telkomsel</p>
         </div>
-
-        {/* Tab */}
         <div style={{display:"flex",background:"#f3f4f6",borderRadius:12,padding:4,marginBottom:24,gap:4}}>
           {[["lapor","📝 Buat Laporan"],["cek","🔍 Cek Status Tiket"]].map(([id,lb])=>(
             <button key={id} onClick={()=>setTab(id)} style={{flex:1,padding:"10px",border:"none",background:tab===id?"#fff":"transparent",color:tab===id?"#e2001a":"#6b7280",cursor:"pointer",fontWeight:700,fontSize:14,fontFamily:"inherit",borderRadius:9,boxShadow:tab===id?"0 1px 4px rgba(0,0,0,0.08)":"none",transition:"all 0.15s"}}>{lb}</button>
           ))}
         </div>
-
-        {/* Tab: Cek Status */}
         {tab==="cek"&&<CekTiket/>}
-
-        {/* Tab: Laporan */}
         {tab==="lapor"&&(
           <Card className="fade">
             <div style={{display:"flex",flexDirection:"column",gap:18}}>
-
-              {/* Baris 1: Nama + Telp */}
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
                 <Inp label="Nama Lengkap" value={f.namaPlg} onChange={v=>sf("namaPlg",v)} required placeholder="Budi Santoso" error={errors.namaPlg}/>
                 <Inp label="No. Telepon" value={f.noTelp} onChange={v=>sf("noTelp",v.replace(/[^0-9\s\-\+]/g,""))} required placeholder="08123456789" error={errors.noTelp}/>
               </div>
-
-              {/* Baris 2: Email + No Internet */}
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
                 <Inp label="Email" type="email" value={f.emailPlg} onChange={v=>sf("emailPlg",v)} required placeholder="nama@gmail.com" error={errors.emailPlg}/>
                 <Inp label="Nomor Internet / Pelanggan" value={f.nomorInternet} onChange={v=>sf("nomorInternet",v.replace(/[^0-9]/g,""))} required placeholder="Cth: 1234567890" error={errors.nomorInternet} hint="Tertera di tagihan / modem"/>
               </div>
-
-              {/* Alamat */}
-              <Inp label="Alamat Lengkap" value={f.alamat} onChange={v=>sf("alamat",v)} required rows={2} placeholder="Jl. Raya No.1, Kelurahan, Kecamatan, Kota/Kab..." error={errors.alamat}/>
-
-              {/* Baris 3: Area + Masalah */}
+              <Inp label="Alamat Lengkap" value={f.alamat} onChange={v=>sf("alamat",v)} required rows={2} placeholder="Jl. Raya No.1, Kelurahan, Kecamatan..." error={errors.alamat}/>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
                 <Sel label="Area" value={f.sto} onChange={v=>sf("sto",v)} options={AREA_LIST} required/>
                 <Sel label="Jenis Masalah" value={f.masalah} onChange={v=>{sf("masalah",v);sf("passwordLama","");sf("passwordBaru","");}} options={MASALAH_LIST} required/>
               </div>
-
-              {/* Password fields */}
               {isGantiPwd&&(
                 <div style={{background:"#fffbeb",border:"1.5px solid #fcd34d",borderRadius:10,padding:16,display:"flex",flexDirection:"column",gap:14}} className="fade">
                   <div style={{color:"#92400e",fontSize:13,fontWeight:700}}>🔑 Informasi Password WiFi</div>
@@ -345,23 +482,17 @@ function CustomerPortal({onSubmit,onGoAdmin}){
                   </div>
                 </div>
               )}
-
-              {/* Prioritas */}
               <div>
                 <label style={{fontSize:12,fontWeight:700,color:"#374151",textTransform:"uppercase",letterSpacing:0.4,display:"block",marginBottom:10}}>Tingkat Urgensi</label>
                 <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
-                  {Object.entries(PRIORITAS).map(([p,c])=>(
-                    <button key={p} onClick={()=>sf("prioritas",p)} style={{padding:"8px 20px",borderRadius:20,border:`2px solid ${c.color}`,background:f.prioritas===p?c.color:c.light,color:f.prioritas===p?"#fff":c.color,cursor:"pointer",fontWeight:700,fontSize:13,fontFamily:"inherit",transition:"all 0.15s"}}>{p}</button>
-                  ))}
+                  {Object.entries(PRIORITAS).map(([p,c])=>(<button key={p} onClick={()=>sf("prioritas",p)} style={{padding:"8px 20px",borderRadius:20,border:`2px solid ${c.color}`,background:f.prioritas===p?c.color:c.light,color:f.prioritas===p?"#fff":c.color,cursor:"pointer",fontWeight:700,fontSize:13,fontFamily:"inherit"}}>{p}</button>))}
                 </div>
               </div>
-
               <Inp label="Deskripsi Masalah" value={f.deskripsi} onChange={v=>sf("deskripsi",v)} required rows={4} placeholder="Jelaskan detail kendala yang Anda alami..." error={errors.deskripsi}/>
               <Btn onClick={submit} disabled={loading} full>{loading?"⏳ Mengirim...":"🚀 Kirim Laporan"}</Btn>
             </div>
           </Card>
         )}
-
         <p style={{textAlign:"center",color:"#d1d5db",fontSize:12,marginTop:24}}>© IndiHome WOK Lampung · Sistem Tiket Online</p>
       </div>
     </div>
@@ -372,52 +503,18 @@ function CustomerPortal({onSubmit,onGoAdmin}){
 // AUTH PAGE
 // ══════════════════════════════════════════════════════════════
 function AuthPage({onLogin,onBack}){
-  const [tab,setTab]=useState("login");
-  const [f,setF]=useState({name:"",email:"",password:"",branch:""});
-  const [err,setErr]=useState("");const [msg,setMsg]=useState("");const [loading,setLoading]=useState(false);
-  const sf=(k,v)=>setF(p=>({...p,[k]:v}));
-
-  const login=async()=>{
-    setLoading(true);setErr("");setMsg("");
-    if(!f.email||!f.password){setErr("Isi email dan password");setLoading(false);return;}
-    const res=await api.post("login",{email:f.email,password:f.password});
-    if(res.error){setErr(res.error);setLoading(false);return;}
-    lsSet("ih_session",res.user);onLogin(res.user);setLoading(false);
-  };
-
-  const register=async()=>{
-    setLoading(true);setErr("");setMsg("");
-    if(!f.name||!f.email||!f.password||!f.branch){setErr("Semua field wajib diisi");setLoading(false);return;}
-    if(!isValidEmail(f.email)){setErr("Format email tidak valid");setLoading(false);return;}
-    const nu={id:"u_"+Date.now(),name:f.name,email:f.email,password:f.password,branch:f.branch,createdAt:new Date().toISOString()};
-    const res=await api.post("addUser",nu);
-    if(res.error){setErr(res.error);setLoading(false);return;}
-    setMsg("✅ Pendaftaran berhasil! Menunggu persetujuan Regulator. Notifikasi akan dikirim ke email Anda.");
-    setLoading(false);
-  };
-
-  const Tab=({id,lb})=>(<button onClick={()=>{setTab(id);setErr("");setMsg("");}} style={{flex:1,padding:"10px",border:"none",background:tab===id?"#e2001a":"transparent",color:tab===id?"#fff":"#6b7280",cursor:"pointer",fontWeight:700,fontSize:14,fontFamily:"inherit",borderRadius:8,transition:"all 0.15s"}}>{lb}</button>);
-
+  const [tab,setTab]=useState("login");const [f,setF]=useState({name:"",email:"",password:"",branch:""});const [err,setErr]=useState("");const [msg,setMsg]=useState("");const [loading,setLoading]=useState(false);const sf=(k,v)=>setF(p=>({...p,[k]:v}));
+  const login=async()=>{setLoading(true);setErr("");if(!f.email||!f.password){setErr("Isi email dan password");setLoading(false);return;}const res=await api.post("login",{email:f.email,password:f.password});if(res.error){setErr(res.error);setLoading(false);return;}lsSet("ih_session",res.user);onLogin(res.user);setLoading(false);};
+  const register=async()=>{setLoading(true);setErr("");if(!f.name||!f.email||!f.password||!f.branch){setErr("Semua field wajib diisi");setLoading(false);return;}if(!isValidEmail(f.email)){setErr("Format email tidak valid");setLoading(false);return;}const nu={id:"u_"+Date.now(),name:f.name,email:f.email,password:f.password,branch:f.branch,createdAt:new Date().toISOString()};const res=await api.post("addUser",nu);if(res.error){setErr(res.error);setLoading(false);return;}setMsg("✅ Pendaftaran berhasil! Menunggu persetujuan Regulator. Notifikasi akan dikirim ke email Anda.");setLoading(false);};
+  const Tab=({id,lb})=>(<button onClick={()=>{setTab(id);setErr("");setMsg("");}} style={{flex:1,padding:"10px",border:"none",background:tab===id?"#e2001a":"transparent",color:tab===id?"#fff":"#6b7280",cursor:"pointer",fontWeight:700,fontSize:14,fontFamily:"inherit",borderRadius:8}}>{lb}</button>);
   return(
     <div style={{minHeight:"100vh",background:"#f5f7fa",display:"flex",alignItems:"center",justifyContent:"center",padding:24}}>
       <Card style={{maxWidth:420,width:"100%"}}>
-        <div style={{textAlign:"center",marginBottom:24}}>
-          <div style={{display:"flex",justifyContent:"center",marginBottom:14}}><Logo height={52}/></div>
-          <h2 style={{color:"#1a1a2e",margin:"0 0 4px",fontSize:20,fontWeight:800}}>Portal Admin</h2>
-          <p style={{color:"#6b7280",fontSize:13}}>WOK Lampung</p>
-        </div>
-        <div style={{display:"flex",background:"#f3f4f6",borderRadius:10,padding:4,marginBottom:20,gap:4}}>
-          <Tab id="login" lb="Login"/><Tab id="register" lb="Daftar Akun Baru"/>
-        </div>
+        <div style={{textAlign:"center",marginBottom:24}}><div style={{display:"flex",justifyContent:"center",marginBottom:14}}><Logo height={52}/></div><h2 style={{color:"#1a1a2e",margin:"0 0 4px",fontSize:20,fontWeight:800}}>Portal Admin</h2><p style={{color:"#6b7280",fontSize:13}}>WOK Lampung</p></div>
+        <div style={{display:"flex",background:"#f3f4f6",borderRadius:10,padding:4,marginBottom:20,gap:4}}><Tab id="login" lb="Login"/><Tab id="register" lb="Daftar Akun Baru"/></div>
         {err&&<div style={{background:"#fef2f2",border:"1px solid #fecaca",color:"#dc2626",borderRadius:8,padding:"10px 14px",fontSize:13,marginBottom:16}}>⚠️ {err}</div>}
         {msg&&<div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",color:"#16a34a",borderRadius:8,padding:"12px 14px",fontSize:13,marginBottom:16,lineHeight:1.6}}>{msg}</div>}
-        {!msg&&<div style={{display:"flex",flexDirection:"column",gap:14}}>
-          {tab==="register"&&<Inp label="Nama Lengkap" value={f.name} onChange={v=>sf("name",v)} required placeholder="Nama Admin"/>}
-          <Inp label="Email" type="email" value={f.email} onChange={v=>sf("email",v)} required placeholder="email@domain.com"/>
-          <Inp label="Password" type="password" value={f.password} onChange={v=>sf("password",v)} required placeholder="••••••••"/>
-          {tab==="register"&&<Sel label="Branch / Area" value={f.branch} onChange={v=>sf("branch",v)} options={AREA_LIST} required/>}
-          <Btn onClick={tab==="login"?login:register} disabled={loading} full>{loading?"⏳ Memproses...":tab==="login"?"🔑 Login":"✅ Daftar"}</Btn>
-        </div>}
+        {!msg&&<div style={{display:"flex",flexDirection:"column",gap:14}}>{tab==="register"&&<Inp label="Nama Lengkap" value={f.name} onChange={v=>sf("name",v)} required placeholder="Nama Admin"/>}<Inp label="Email" type="email" value={f.email} onChange={v=>sf("email",v)} required placeholder="email@domain.com"/><Inp label="Password" type="password" value={f.password} onChange={v=>sf("password",v)} required placeholder="••••••••"/>{tab==="register"&&<Sel label="Branch / Area" value={f.branch} onChange={v=>sf("branch",v)} options={AREA_LIST} required/>}<Btn onClick={tab==="login"?login:register} disabled={loading} full>{loading?"⏳ Memproses...":tab==="login"?"🔑 Login":"✅ Daftar"}</Btn></div>}
         <button onClick={onBack} style={{width:"100%",background:"none",border:"none",color:"#9ca3af",cursor:"pointer",fontSize:13,marginTop:18,padding:8}}>← Kembali ke Portal Pelanggan</button>
       </Card>
     </div>
@@ -428,143 +525,52 @@ function AuthPage({onLogin,onBack}){
 // TICKET MODAL
 // ══════════════════════════════════════════════════════════════
 function TicketModal({ticket,user,onClose,onUpdate}){
-  const [tiketTlk,setTiketTlk]=useState(ticket.tiketTelkomsel||"");
-  const [teknisi,setTeknisi]=useState(ticket.teknisi||"");
-  const [catatanTA,setCatatanTA]=useState(ticket.catatanTA||"");
-  const [catatanBranch,setCatatanBranch]=useState(ticket.catatanBranch||"");
-  const [alasan,setAlasan]=useState("");
-  const [loading,setLoading]=useState(false);
-
-  const upd=async patch=>{
-    setLoading(true);
-    const merged={...ticket,...patch,updatedAt:new Date().toISOString()};
-    const res=await api.post("updateTicket",merged);
-    if(res.success)onUpdate(merged);else alert("Gagal: "+(res.error||""));
-    setLoading(false);
-  };
+  const [tiketTlk,setTiketTlk]=useState(ticket.tiketTelkomsel||"");const [teknisi,setTeknisi]=useState(ticket.teknisi||"");const [catatanTA,setCatatanTA]=useState(ticket.catatanTA||"");const [catatanBranch,setCatatanBranch]=useState(ticket.catatanBranch||"");const [alasan,setAlasan]=useState("");const [loading,setLoading]=useState(false);
+  const upd=async patch=>{setLoading(true);const merged={...ticket,...patch,updatedAt:new Date().toISOString()};const res=await api.post("updateTicket",merged);if(res.success)onUpdate(merged);else alert("Gagal: "+(res.error||""));setLoading(false);};
   const branchSelesai=async()=>upd({status:"selesai",tiketTelkomsel:tiketTlk,catatanBranch,resolvedAt:new Date().toISOString(),adminBranch:user.id});
   const taSelesai=async()=>upd({status:"selesai",teknisi,catatanTA,tiketTelkomsel:tiketTlk,resolvedAt:new Date().toISOString()});
   const rollback=async()=>{if(!alasan.trim()){alert("Isi alasan rollback");return;}upd({status:"dikembalikan",alasanRollback:alasan,teknisi:"",catatanTA:""});};
   const prosesUlang=async()=>upd({status:"diproses",alasanRollback:""});
-
   const isBranch=user.role==="branch",isTA=user.role==="ta";
-  const canProcess  = isBranch&&ticket.status==="baru";
-  const canAct      = isBranch&&ticket.status==="diproses";
-  const canReturn   = isBranch&&ticket.status==="dikembalikan";
-  const canWork     = isTA&&ticket.status==="dieskalasi";
-  const canFinish   = isTA&&ticket.status==="dikerjakan";
-  const canRollback = isTA&&["dieskalasi","dikerjakan"].includes(ticket.status);
-
+  const sla=getSLA(ticket);
   const Ibox=({label,value,icon,col})=>(<div style={{background:col?"#fffbeb":"#f9fafb",borderRadius:8,padding:"10px 14px",border:`1px solid ${col?"#fcd34d":"#f0f0f0"}`}}><div style={{color:"#9ca3af",fontSize:10,fontWeight:700,marginBottom:4,textTransform:"uppercase"}}>{icon} {label}</div><div style={{color:col?"#d97706":"#1a1a2e",fontSize:13,fontWeight:600}}>{value||"-"}</div></div>);
-
   return(
     <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
       <div onClick={e=>e.stopPropagation()} style={{background:"#fff",borderRadius:16,border:"1px solid #e5e7eb",width:"100%",maxWidth:680,maxHeight:"92vh",overflow:"auto",boxShadow:"0 20px 60px rgba(0,0,0,0.15)"}}>
         <div style={{background:"linear-gradient(135deg,#e2001a,#c0001a)",padding:"16px 20px",borderRadius:"16px 16px 0 0",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
           <div><div style={{color:"#fff",fontWeight:800,fontFamily:"monospace",fontSize:16}}>{ticket.id}</div><div style={{color:"#ffd0d0",fontSize:12}}>{fmtDate(ticket.createdAt)}</div></div>
-          <button onClick={onClose} style={{background:"rgba(255,255,255,0.2)",border:"none",color:"#fff",width:32,height:32,borderRadius:8,cursor:"pointer",fontSize:18,fontWeight:700}}>×</button>
+          <div style={{display:"flex",gap:8,alignItems:"center"}}>
+            {sla&&sla.key!=="fresh"&&<span style={{background:"rgba(255,255,255,0.2)",color:"#fff",borderRadius:20,padding:"4px 12px",fontSize:12,fontWeight:700}}>{sla.icon} {sla.label}</span>}
+            <button onClick={onClose} style={{background:"rgba(255,255,255,0.2)",border:"none",color:"#fff",width:32,height:32,borderRadius:8,cursor:"pointer",fontSize:18,fontWeight:700}}>×</button>
+          </div>
         </div>
-
         <div style={{padding:20,display:"flex",flexDirection:"column",gap:14}}>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-            <Ibox label="Pelanggan"    value={ticket.namaPlg}       icon="👤"/>
-            <Ibox label="Telepon"      value={ticket.noTelp}        icon="📞"/>
-            <Ibox label="Email"        value={ticket.emailPlg}      icon="📧"/>
-            <Ibox label="No. Internet" value={ticket.nomorInternet} icon="🔌"/>
+            <Ibox label="Pelanggan" value={ticket.namaPlg} icon="👤"/><Ibox label="Telepon" value={ticket.noTelp} icon="📞"/>
+            <Ibox label="Email" value={ticket.emailPlg} icon="📧"/><Ibox label="No. Internet" value={ticket.nomorInternet} icon="🔌"/>
           </div>
-
-          {/* Alamat */}
-          <div style={{background:"#f9fafb",borderRadius:8,padding:"10px 14px",border:"1px solid #f0f0f0"}}>
-            <div style={{color:"#9ca3af",fontSize:10,fontWeight:700,marginBottom:4}}>📍 ALAMAT</div>
-            <div style={{color:"#1a1a2e",fontSize:13,fontWeight:600}}>{ticket.alamat||"-"}</div>
-          </div>
-
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-            <Ibox label="Area"    value={ticket.sto}     icon="🗺️"/>
-            <Ibox label="Masalah" value={ticket.masalah} icon="🔧"/>
-          </div>
-
-          {/* Password info */}
-          {ticket.masalah==="Ganti Password WiFi"&&(
-            <div style={{background:"#fffbeb",border:"1px solid #fcd34d",borderRadius:8,padding:"12px 14px",display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-              <div><div style={{color:"#92400e",fontSize:10,fontWeight:700,marginBottom:4}}>🔑 PASSWORD LAMA</div><div style={{color:"#1a1a2e",fontSize:13,fontFamily:"monospace",fontWeight:600}}>{ticket.passwordLama||"-"}</div></div>
-              <div><div style={{color:"#92400e",fontSize:10,fontWeight:700,marginBottom:4}}>🔑 PASSWORD BARU</div><div style={{color:"#16a34a",fontSize:13,fontFamily:"monospace",fontWeight:700}}>{ticket.passwordBaru||"-"}</div></div>
-            </div>
-          )}
-
+          <div style={{background:"#f9fafb",borderRadius:8,padding:"10px 14px",border:"1px solid #f0f0f0"}}><div style={{color:"#9ca3af",fontSize:10,fontWeight:700,marginBottom:4}}>📍 ALAMAT</div><div style={{color:"#1a1a2e",fontSize:13,fontWeight:600}}>{ticket.alamat||"-"}</div></div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}><Ibox label="Area" value={ticket.sto} icon="🗺️"/><Ibox label="Masalah" value={ticket.masalah} icon="🔧"/></div>
+          {ticket.masalah==="Ganti Password WiFi"&&<div style={{background:"#fffbeb",border:"1px solid #fcd34d",borderRadius:8,padding:"12px 14px",display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}><div><div style={{color:"#92400e",fontSize:10,fontWeight:700,marginBottom:4}}>🔑 PASSWORD LAMA</div><div style={{color:"#1a1a2e",fontSize:13,fontFamily:"monospace",fontWeight:600}}>{ticket.passwordLama||"-"}</div></div><div><div style={{color:"#92400e",fontSize:10,fontWeight:700,marginBottom:4}}>🔑 PASSWORD BARU</div><div style={{color:"#16a34a",fontSize:13,fontFamily:"monospace",fontWeight:700}}>{ticket.passwordBaru||"-"}</div></div></div>}
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
             <div style={{background:"#f9fafb",borderRadius:8,padding:"10px 14px",border:"1px solid #f0f0f0"}}><div style={{color:"#9ca3af",fontSize:10,fontWeight:700,marginBottom:6}}>⚡ PRIORITAS</div><PBadge p={ticket.prioritas}/></div>
             <div style={{background:"#f9fafb",borderRadius:8,padding:"10px 14px",border:"1px solid #f0f0f0"}}><div style={{color:"#9ca3af",fontSize:10,fontWeight:700,marginBottom:6}}>📊 STATUS</div><Badge status={ticket.status}/></div>
           </div>
-
-          <div style={{background:"#f9fafb",borderRadius:8,padding:"12px 14px",border:"1px solid #f0f0f0"}}>
-            <div style={{color:"#9ca3af",fontSize:10,fontWeight:700,marginBottom:6}}>📝 DESKRIPSI</div>
-            <div style={{color:"#374151",fontSize:14,lineHeight:1.6}}>{ticket.deskripsi}</div>
-          </div>
-
-          {/* Rollback info */}
-          {ticket.alasanRollback&&(
-            <div style={{background:"#fef2f2",border:"1.5px solid #fecaca",borderRadius:8,padding:"12px 14px"}}>
-              <div style={{color:"#dc2626",fontSize:11,fontWeight:700,marginBottom:4}}>↩️ DIKEMBALIKAN — ALASAN:</div>
-              <div style={{color:"#374151",fontSize:13}}>{ticket.alasanRollback}</div>
-            </div>
-          )}
-
-          {/* No Tiket Telkomsel input */}
-          {isBranch&&["baru","diproses","dikembalikan"].includes(ticket.status)&&(
-            <Inp label="No. Tiket Telkomsel (opsional)" value={tiketTlk} onChange={setTiketTlk} placeholder="Cth: 1-123456789"/>
-          )}
+          <div style={{background:"#f9fafb",borderRadius:8,padding:"12px 14px",border:"1px solid #f0f0f0"}}><div style={{color:"#9ca3af",fontSize:10,fontWeight:700,marginBottom:6}}>📝 DESKRIPSI</div><div style={{color:"#374151",fontSize:14,lineHeight:1.6}}>{ticket.deskripsi}</div></div>
+          {ticket.alasanRollback&&<div style={{background:"#fef2f2",border:"1.5px solid #fecaca",borderRadius:8,padding:"12px 14px"}}><div style={{color:"#dc2626",fontSize:11,fontWeight:700,marginBottom:4}}>↩️ DIKEMBALIKAN — ALASAN:</div><div style={{color:"#374151",fontSize:13}}>{ticket.alasanRollback}</div></div>}
+          {isBranch&&["baru","diproses","dikembalikan"].includes(ticket.status)&&<Inp label="No. Tiket Telkomsel (opsional)" value={tiketTlk} onChange={setTiketTlk} placeholder="Cth: 1-123456789"/>}
           {ticket.tiketTelkomsel&&<Ibox label="No. Tiket Telkomsel" value={ticket.tiketTelkomsel} icon="📌" col={true}/>}
-
-          {/* Branch: keterangan penanganan sendiri */}
-          {canAct&&(
-            <Inp label="Keterangan Penanganan (jika selesai sendiri)" value={catatanBranch} onChange={setCatatanBranch} rows={2} placeholder="Cth: Sudah reset password WiFi sesuai permintaan pelanggan..."/>
-          )}
-
-          {/* TA fields */}
-          {isTA&&["dieskalasi","dikerjakan"].includes(ticket.status)&&(
-            <div style={{display:"flex",flexDirection:"column",gap:12}}>
-              <Inp label="Nama Teknisi" value={teknisi} onChange={setTeknisi} placeholder="Nama / Tim teknisi"/>
-              <Inp label="Catatan Penanganan TA" value={catatanTA} onChange={setCatatanTA} rows={3} placeholder="Tindakan yang dilakukan, hasil pengecekan..."/>
-            </div>
-          )}
-
-          {/* Tampil keterangan branch ke TA */}
-          {ticket.catatanBranch&&isTA&&(
-            <div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:8,padding:"12px 14px"}}>
-              <div style={{color:"#166534",fontSize:10,fontWeight:700,marginBottom:4}}>📝 CATATAN ADMIN BRANCH</div>
-              <div style={{color:"#374151",fontSize:13}}>{ticket.catatanBranch}</div>
-            </div>
-          )}
-
-          {/* Tampil info teknisi ke branch */}
-          {ticket.teknisi&&isBranch&&(
-            <div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:8,padding:"12px 14px"}}>
-              <div style={{color:"#166534",fontSize:10,fontWeight:700,marginBottom:6}}>👷 TEKNISI & CATATAN TA</div>
-              <div style={{color:"#1a1a2e",fontSize:14,fontWeight:600}}>{ticket.teknisi}</div>
-              {ticket.catatanTA&&<div style={{color:"#6b7280",fontSize:13,marginTop:4}}>{ticket.catatanTA}</div>}
-            </div>
-          )}
-
-          {/* Rollback input TA */}
-          {canRollback&&(
-            <div style={{background:"#fef2f2",border:"1.5px dashed #fca5a5",borderRadius:10,padding:14}}>
-              <div style={{color:"#dc2626",fontSize:12,fontWeight:700,marginBottom:8}}>↩️ KEMBALIKAN KE ADMIN BRANCH</div>
-              <Inp label="Alasan Rollback" value={alasan} onChange={setAlasan} rows={2} placeholder="Contoh: Tiket Telkomsel tidak terdeteksi, mohon cek ulang nomor tiket..." bg="#fff"/>
-              <div style={{marginTop:10}}><Btn onClick={rollback} disabled={loading} v="danger" sm>↩️ Rollback ke Branch</Btn></div>
-            </div>
-          )}
-
-          {/* ACTION BUTTONS */}
+          {isBranch&&ticket.status==="diproses"&&<Inp label="Keterangan Penanganan (jika selesai sendiri)" value={catatanBranch} onChange={setCatatanBranch} rows={2} placeholder="Cth: Sudah reset password sesuai permintaan pelanggan..."/>}
+          {isTA&&["dieskalasi","dikerjakan"].includes(ticket.status)&&<div style={{display:"flex",flexDirection:"column",gap:12}}><Inp label="Nama Teknisi" value={teknisi} onChange={setTeknisi} placeholder="Nama / Tim teknisi"/><Inp label="Catatan Penanganan TA" value={catatanTA} onChange={setCatatanTA} rows={3} placeholder="Tindakan yang dilakukan..."/></div>}
+          {ticket.catatanBranch&&isTA&&<div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:8,padding:"12px 14px"}}><div style={{color:"#166534",fontSize:10,fontWeight:700,marginBottom:4}}>📝 CATATAN ADMIN BRANCH</div><div style={{color:"#374151",fontSize:13}}>{ticket.catatanBranch}</div></div>}
+          {ticket.teknisi&&isBranch&&<div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:8,padding:"12px 14px"}}><div style={{color:"#166534",fontSize:10,fontWeight:700,marginBottom:6}}>👷 TEKNISI & CATATAN TA</div><div style={{color:"#1a1a2e",fontSize:14,fontWeight:600}}>{ticket.teknisi}</div>{ticket.catatanTA&&<div style={{color:"#6b7280",fontSize:13,marginTop:4}}>{ticket.catatanTA}</div>}</div>}
+          {isTA&&["dieskalasi","dikerjakan"].includes(ticket.status)&&<div style={{background:"#fef2f2",border:"1.5px dashed #fca5a5",borderRadius:10,padding:14}}><div style={{color:"#dc2626",fontSize:12,fontWeight:700,marginBottom:8}}>↩️ KEMBALIKAN KE ADMIN BRANCH</div><Inp label="Alasan Rollback" value={alasan} onChange={setAlasan} rows={2} placeholder="Contoh: Tiket Telkomsel tidak terdeteksi..." bg="#fff"/><div style={{marginTop:10}}><Btn onClick={rollback} disabled={loading} v="danger" sm>↩️ Rollback ke Branch</Btn></div></div>}
           <div style={{display:"flex",gap:10,flexWrap:"wrap",paddingTop:6,borderTop:"1px solid #f0f0f0"}}>
-            {canProcess&&<Btn onClick={()=>upd({status:"diproses",tiketTelkomsel:tiketTlk,adminBranch:user.id})} disabled={loading} v="secondary">⚙️ Proses Tiket</Btn>}
-            {canAct&&<>
-              <Btn onClick={branchSelesai} disabled={loading} v="success">✅ Selesaikan & Email Pelanggan</Btn>
-              <Btn onClick={()=>upd({status:"dieskalasi",tiketTelkomsel:tiketTlk,catatanBranch})} disabled={loading} v="purple">📤 Eskalasi ke TA</Btn>
-            </>}
-            {canReturn&&<Btn onClick={prosesUlang} disabled={loading} v="warn">🔄 Proses Ulang</Btn>}
-            {canWork&&<Btn onClick={()=>upd({status:"dikerjakan",teknisi,catatanTA})} disabled={loading} v="orange">🔧 Assign & Kerjakan</Btn>}
-            {canFinish&&<Btn onClick={taSelesai} disabled={loading} v="success">✅ Selesai & Email Pelanggan</Btn>}
+            {isBranch&&ticket.status==="baru"&&<Btn onClick={()=>upd({status:"diproses",tiketTelkomsel:tiketTlk,adminBranch:user.id})} disabled={loading} v="secondary">⚙️ Proses Tiket</Btn>}
+            {isBranch&&ticket.status==="diproses"&&<><Btn onClick={branchSelesai} disabled={loading} v="success">✅ Selesaikan & Email</Btn><Btn onClick={()=>upd({status:"dieskalasi",tiketTelkomsel:tiketTlk,catatanBranch})} disabled={loading} v="purple">📤 Eskalasi ke TA</Btn></>}
+            {isBranch&&ticket.status==="dikembalikan"&&<Btn onClick={prosesUlang} disabled={loading} v="warn">🔄 Proses Ulang</Btn>}
+            {isTA&&ticket.status==="dieskalasi"&&<Btn onClick={()=>upd({status:"dikerjakan",teknisi,catatanTA})} disabled={loading} v="orange">🔧 Assign & Kerjakan</Btn>}
+            {isTA&&ticket.status==="dikerjakan"&&<Btn onClick={taSelesai} disabled={loading} v="success">✅ Selesai & Email Pelanggan</Btn>}
           </div>
         </div>
       </div>
@@ -573,65 +579,156 @@ function TicketModal({ticket,user,onClose,onUpdate}){
 }
 
 // ══════════════════════════════════════════════════════════════
-// KELOLA ADMIN (Regulator)
+// KELOLA ADMIN
 // ══════════════════════════════════════════════════════════════
 function KelolAdmin({users,setUsers}){
   const [loading,setLoading]=useState({});
-  const action=async(userId,act)=>{
-    setLoading(p=>({...p,[userId]:true}));
-    const res=await api.post(act==="approve"?"approveUser":"rejectUser",{userId});
-    if(res.success)setUsers(p=>p.map(u=>u.id===userId?{...u,status:act==="approve"?"active":"rejected"}:u));
-    else alert("Gagal: "+(res.error||""));
-    setLoading(p=>({...p,[userId]:false}));
-  };
-  const UCard=({u,sa})=>(<div style={{background:"#fff",borderRadius:10,padding:16,marginBottom:8,display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:10,border:"1px solid #e5e7eb",boxShadow:"0 1px 3px rgba(0,0,0,0.03)"}}><div><div style={{color:"#1a1a2e",fontWeight:700,fontSize:14}}>{u.name}</div><div style={{color:"#6b7280",fontSize:12,margin:"2px 0"}}>{u.email} · {u.branch}</div><div style={{marginTop:6}}><RoleBadge role={u.role}/></div></div>{sa&&<div style={{display:"flex",gap:8}}><Btn onClick={()=>action(u.id,"approve")} disabled={loading[u.id]} v="success" sm>✅ Setujui</Btn><Btn onClick={()=>action(u.id,"reject")} disabled={loading[u.id]} v="danger" sm>❌ Tolak</Btn></div>}</div>);
+  const action=async(userId,act)=>{setLoading(p=>({...p,[userId]:true}));const res=await api.post(act==="approve"?"approveUser":"rejectUser",{userId});if(res.success)setUsers(p=>p.map(u=>u.id===userId?{...u,status:act==="approve"?"active":"rejected"}:u));else alert("Gagal");setLoading(p=>({...p,[userId]:false}));};
+  const UCard=({u,sa})=>(<div style={{background:"#fff",borderRadius:10,padding:16,marginBottom:8,display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:10,border:"1px solid #e5e7eb"}}><div><div style={{color:"#1a1a2e",fontWeight:700,fontSize:14}}>{u.name}</div><div style={{color:"#6b7280",fontSize:12,margin:"2px 0"}}>{u.email} · {u.branch}</div><div style={{marginTop:6}}><RoleBadge role={u.role}/></div></div>{sa&&<div style={{display:"flex",gap:8}}><Btn onClick={()=>action(u.id,"approve")} disabled={loading[u.id]} v="success" sm>✅ Setujui</Btn><Btn onClick={()=>action(u.id,"reject")} disabled={loading[u.id]} v="danger" sm>❌ Tolak</Btn></div>}</div>);
   const Sec=({title,list,sa,color})=>(<div style={{marginBottom:28}}><h3 style={{color,fontSize:14,fontWeight:700,marginBottom:12,display:"flex",alignItems:"center",gap:8}}>{title}<span style={{background:"#f3f4f6",color:"#6b7280",borderRadius:20,padding:"1px 8px",fontSize:12}}>{list.length}</span></h3>{list.length===0?<div style={{color:"#9ca3af",fontSize:13,padding:12,background:"#f9fafb",borderRadius:8,border:"1px dashed #e5e7eb"}}>Tidak ada</div>:list.map(u=><UCard key={u.id} u={u} sa={sa}/>)}</div>);
   return(<div><h2 style={{color:"#1a1a2e",margin:"0 0 24px",fontSize:22,fontWeight:800}}>👥 Kelola Admin Branch</h2><Sec title="⏳ Menunggu Persetujuan" list={users.filter(u=>u.status==="pending")} sa={true} color="#d97706"/><Sec title="✅ Sudah Disetujui" list={users.filter(u=>u.status==="active"&&u.role==="branch")} sa={false} color="#16a34a"/><Sec title="❌ Ditolak" list={users.filter(u=>u.status==="rejected")} sa={false} color="#dc2626"/></div>);
 }
 
 // ══════════════════════════════════════════════════════════════
+// TOAST NOTIFICATION
+// ══════════════════════════════════════════════════════════════
+function ToastContainer({toasts,onDismiss}){
+  return(
+    <div style={{position:"fixed",top:16,right:16,zIndex:9999,display:"flex",flexDirection:"column",gap:8,maxWidth:360}}>
+      {toasts.map(t=>(
+        <div key={t.id} className="fade" style={{background:t.type==="rollback"?"#fef2f2":t.type==="new"?"#eff6ff":t.type==="selesai"?"#f0fdf4":"#fff",border:`1.5px solid ${t.type==="rollback"?"#fca5a5":t.type==="new"?"#93c5fd":t.type==="selesai"?"#86efac":"#e5e7eb"}`,borderRadius:12,padding:"12px 14px",boxShadow:"0 4px 20px rgba(0,0,0,0.12)",display:"flex",gap:10,alignItems:"flex-start"}}>
+          <span style={{fontSize:18,flexShrink:0}}>{t.icon}</span>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{fontWeight:700,fontSize:13,color:"#1a1a2e",marginBottom:2}}>{t.title}</div>
+            <div style={{fontSize:12,color:"#6b7280",lineHeight:1.4}}>{t.msg}</div>
+          </div>
+          <button onClick={()=>onDismiss(t.id)} style={{background:"none",border:"none",color:"#9ca3af",cursor:"pointer",fontSize:16,padding:0,flexShrink:0}}>×</button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════
 // DASHBOARD
 // ══════════════════════════════════════════════════════════════
+const POLL_INTERVAL = 30; // detik
+
 function Dashboard({user,tickets,setTickets,onLogout}){
   const [view,setView]=useState(user.role==="regulator"?"admin":"tickets");
   const [sel,setSel]=useState(null);
-  const [filterStatus,setFS]=useState("all");
-  const [filterMasalah,setFM]=useState("all");
-  const [filterArea,setFA]=useState("all");
-  const [search,setSearch]=useState("");
-  const [refreshing,setRef]=useState(false);
-  const [users,setUsers]=useState([]);
+  const [filterStatus,setFS]=useState("all");const [filterMasalah,setFM]=useState("all");const [filterArea,setFA]=useState("all");
+  const [search,setSearch]=useState("");const [refreshing,setRef]=useState(false);const [users,setUsers]=useState([]);
 
-  useEffect(()=>{if(user.role==="regulator")api.get("getUsers").then(d=>{if(Array.isArray(d))setUsers(d);});},[]);
+  // Auto-refresh state
+  const [countdown,setCountdown]=useState(POLL_INTERVAL);
+  const [lastSync,setLastSync]=useState(new Date());
+  const [toasts,setToasts]=useState([]);
+  const prevTicketsRef=useRef({});
+  const toastIdRef=useRef(0);
 
-  const refresh=async()=>{setRef(true);const d=await api.get("getTickets");if(Array.isArray(d))setTickets(d);setRef(false);};
+  const addToast=(type,icon,title,msg)=>{
+    const id=++toastIdRef.current;
+    setToasts(p=>[...p.slice(-4),{id,type,icon,title,msg}]);
+    setTimeout(()=>setToasts(p=>p.filter(t=>t.id!==id)),7000);
+  };
+  const dismissToast=id=>setToasts(p=>p.filter(t=>t.id!==id));
+
+  // Deteksi perubahan dan tampilkan notifikasi
+  const detectChanges=useCallback((oldMap,newTickets)=>{
+    let newCount=0, changedCount=0;
+    newTickets.forEach(t=>{
+      const old=oldMap[t.id];
+      if(!old){
+        newCount++;
+      } else if(old.status!==t.status){
+        changedCount++;
+        // Notifikasi spesifik per role
+        if(user.role==="branch"&&t.status==="dikembalikan"){
+          addToast("rollback","↩️","Tiket Dikembalikan TA!",`Tiket ${t.id} (${t.namaPlg}) dikembalikan. Alasan: ${t.alasanRollback||"-"}`);
+        } else if(user.role==="branch"&&t.status==="selesai"&&old.status==="dikerjakan"){
+          addToast("selesai","✅","Tiket Selesai",`Tiket ${t.id} (${t.namaPlg}) selesai ditangani TA.`);
+        } else if(user.role==="ta"&&t.status==="dieskalasi"&&old.status!=="dieskalasi"){
+          addToast("new","📤","Tiket Baru Dieskalasi",`Tiket ${t.id} dari ${t.namaPlg} (${t.sto}) masuk ke antrian TA.`);
+        }
+      }
+    });
+    if(newCount>0&&user.role!=="regulator"){
+      addToast("new","🆕","Tiket Baru Masuk",`${newCount} tiket baru telah ditambahkan.`);
+    }
+    if(changedCount>0||newCount>0) setLastSync(new Date());
+  },[user.role]);
+
+  // Fetch + deteksi perubahan
+  const doRefresh=useCallback(async(silent=false)=>{
+    if(!silent)setRef(true);
+    const d=await api.get("getTickets");
+    if(Array.isArray(d)){
+      const oldMap=prevTicketsRef.current;
+      detectChanges(oldMap,d);
+      const newMap={};d.forEach(t=>newMap[t.id]=t);
+      prevTicketsRef.current=newMap;
+      setTickets(d);
+      if(!silent)setLastSync(new Date());
+    }
+    if(!silent)setRef(false);
+  },[detectChanges,setTickets]);
+
+  // Init
+  useEffect(()=>{
+    if(user.role==="regulator")api.get("getUsers").then(d=>{if(Array.isArray(d))setUsers(d);});
+    // Set initial map
+    const map={};tickets.forEach(t=>map[t.id]=t);
+    prevTicketsRef.current=map;
+  },[]);
+
+  // Auto-poll setiap POLL_INTERVAL detik
+  useEffect(()=>{
+    const poll=setInterval(()=>doRefresh(true),POLL_INTERVAL*1000);
+    return()=>clearInterval(poll);
+  },[doRefresh]);
+
+  // Countdown timer
+  useEffect(()=>{
+    setCountdown(POLL_INTERVAL);
+    const tick=setInterval(()=>setCountdown(p=>p<=1?POLL_INTERVAL:p-1),1000);
+    return()=>clearInterval(tick);
+  },[lastSync]);
+
+  // Refresh saat tab aktif kembali
+  useEffect(()=>{
+    const onVisible=()=>{if(document.visibilityState==="visible")doRefresh(true);};
+    document.addEventListener("visibilitychange",onVisible);
+    return()=>document.removeEventListener("visibilitychange",onVisible);
+  },[doRefresh]);
+
+  const refresh=()=>doRefresh(false);
 
   const myT=useMemo(()=>user.role==="ta"?tickets.filter(t=>["dieskalasi","dikerjakan","selesai"].includes(t.status)):tickets,[tickets,user.role]);
-
-  const filtered=useMemo(()=>myT.filter(t=>{
-    const ms=filterStatus==="all"||t.status===filterStatus;
-    const mm=filterMasalah==="all"||t.masalah===filterMasalah;
-    const ma=filterArea==="all"||t.sto===filterArea;
-    const mq=!search||[t.id,t.namaPlg,t.masalah,t.sto,t.tiketTelkomsel,t.nomorInternet,t.alamat].some(v=>String(v||"").toLowerCase().includes(search.toLowerCase()));
-    return ms&&mm&&ma&&mq;
-  }).sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt)),[myT,filterStatus,filterMasalah,filterArea,search]);
-
+  const filtered=useMemo(()=>myT.filter(t=>{const ms=filterStatus==="all"||t.status===filterStatus;const mm=filterMasalah==="all"||t.masalah===filterMasalah;const ma=filterArea==="all"||t.sto===filterArea;const mq=!search||[t.id,t.namaPlg,t.masalah,t.sto,t.tiketTelkomsel,t.nomorInternet,t.alamat].some(v=>String(v||"").toLowerCase().includes(search.toLowerCase()));return ms&&mm&&ma&&mq;}).sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt)),[myT,filterStatus,filterMasalah,filterArea,search]);
   const stats=useMemo(()=>({total:myT.length,baru:myT.filter(t=>t.status==="baru").length,diproses:myT.filter(t=>t.status==="diproses").length,dikembalikan:myT.filter(t=>t.status==="dikembalikan").length,dieskalasi:myT.filter(t=>t.status==="dieskalasi").length,dikerjakan:myT.filter(t=>t.status==="dikerjakan").length,selesai:myT.filter(t=>t.status==="selesai").length}),[myT]);
 
+  // SLA alert count
+  const slaAlert=useMemo(()=>myT.filter(t=>{if(t.status==="selesai")return false;const s=getSLA(t);return s&&s.key!=="fresh";}).length,[myT]);
   const pendingCount=users.filter(u=>u.status==="pending").length;
   const updateTicket=u=>{setTickets(p=>p.map(t=>t.id===u.id?u:t));setSel(u);};
   const roleColor={branch:"#2563eb",ta:"#d97706",regulator:"#7c3aed"};
 
-  const NavBtn=({id,ic,lb,badge=0})=>(<button onClick={()=>setView(id)} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 14px",margin:"2px 6px",background:view===id?"#fff5f5":"transparent",border:view===id?"1px solid #fecaca":"1px solid transparent",borderRadius:8,color:view===id?"#e2001a":"#6b7280",cursor:"pointer",fontWeight:600,fontSize:13,fontFamily:"inherit",transition:"all 0.15s"}}><span style={{display:"flex",alignItems:"center",gap:8}}>{ic} {lb}</span>{badge>0&&<span style={{background:"#e2001a",color:"#fff",borderRadius:10,padding:"1px 7px",fontSize:10,fontWeight:700}}>{badge}</span>}</button>);
+  const NavBtn=({id,ic,lb,badge=0,badgeColor="#e2001a"})=>(<button onClick={()=>setView(id)} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 14px",margin:"2px 6px",background:view===id?"#fff5f5":"transparent",border:view===id?"1px solid #fecaca":"1px solid transparent",borderRadius:8,color:view===id?"#e2001a":"#6b7280",cursor:"pointer",fontWeight:600,fontSize:13,fontFamily:"inherit",transition:"all 0.15s"}}><span style={{display:"flex",alignItems:"center",gap:8}}>{ic} {lb}</span>{badge>0&&<span style={{background:badgeColor,color:"#fff",borderRadius:10,padding:"1px 7px",fontSize:10,fontWeight:700}}>{badge}</span>}</button>);
 
   return(
     <div style={{minHeight:"100vh",background:"#f5f7fa",display:"flex"}}>
+      <ToastContainer toasts={toasts} onDismiss={dismissToast}/>
       {/* Sidebar */}
       <div style={{width:230,background:"#fff",borderRight:"1px solid #e5e7eb",display:"flex",flexDirection:"column",padding:"16px 0",flexShrink:0,boxShadow:"2px 0 6px rgba(0,0,0,0.04)"}}>
         <div style={{padding:"0 16px 16px",borderBottom:"1px solid #e5e7eb",marginBottom:12,display:"flex",justifyContent:"center"}}><Logo height={36}/></div>
-        {user.role!=="regulator"&&<NavBtn id="tickets" ic="🎫" lb="Tiket"/>}
-        {user.role!=="regulator"&&<NavBtn id="stats"   ic="📊" lb="Statistik"/>}
-        {user.role==="regulator"&&<NavBtn id="admin"   ic="👥" lb="Kelola Admin" badge={pendingCount}/>}
+        {user.role!=="regulator"&&<>
+          <NavBtn id="tickets" ic="🎫" lb="Tiket"/>
+          <NavBtn id="sla"     ic="⏱"  lb="SLA Monitor" badge={slaAlert} badgeColor={slaAlert>0?"#dc2626":"#16a34a"}/>
+          <NavBtn id="grafik"  ic="📈" lb="Grafik"/>
+          <NavBtn id="stats"   ic="📊" lb="Statistik"/>
+        </>}
+        {user.role==="regulator"&&<NavBtn id="admin" ic="👥" lb="Kelola Admin" badge={pendingCount}/>}
         <div style={{flex:1}}/>
         <div style={{padding:16,borderTop:"1px solid #e5e7eb"}}>
           <div style={{background:"#f9fafb",borderRadius:8,padding:12,marginBottom:10,border:"1px solid #e5e7eb"}}>
@@ -639,6 +736,21 @@ function Dashboard({user,tickets,setTickets,onLogout}){
             <div style={{color:roleColor[user.role],fontSize:11,fontWeight:700,textTransform:"uppercase",marginBottom:2}}>{user.role==="ta"?"Admin TA":user.role==="regulator"?"Regulator":"Admin Branch"}</div>
             <div style={{color:"#9ca3af",fontSize:11}}>{user.branch}</div>
           </div>
+          {/* Live sync indicator */}
+          <div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:8,padding:"8px 10px",marginBottom:10,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+            <div style={{display:"flex",alignItems:"center",gap:6}}>
+              <div style={{width:7,height:7,borderRadius:"50%",background:"#16a34a",animation:"pulse 1.5s infinite"}}/>
+              <span style={{color:"#15803d",fontSize:11,fontWeight:700}}>LIVE</span>
+            </div>
+            <div style={{textAlign:"right"}}>
+              <div style={{color:"#6b7280",fontSize:10}}>Refresh dalam</div>
+              <div style={{color:"#15803d",fontWeight:700,fontSize:12,fontFamily:"monospace"}}>{countdown}s</div>
+            </div>
+          </div>
+          <div style={{textAlign:"center",marginBottom:8}}>
+            <span style={{color:"#9ca3af",fontSize:10}}>Sync: {lastSync.toLocaleTimeString("id-ID",{hour:"2-digit",minute:"2-digit",second:"2-digit"})}</span>
+          </div>
+          <button onClick={()=>refresh()} disabled={refreshing} style={{width:"100%",padding:"7px",background:refreshing?"#f9fafb":"#fff5f5",border:"1px solid #fecaca",borderRadius:8,color:refreshing?"#9ca3af":"#e2001a",cursor:refreshing?"not-allowed":"pointer",fontSize:12,fontFamily:"inherit",fontWeight:600,marginBottom:8}}>{refreshing?"⏳ Memuat...":"🔄 Refresh Sekarang"}</button>
           <button onClick={onLogout} style={{width:"100%",padding:"8px",background:"none",border:"1px solid #e5e7eb",borderRadius:8,color:"#6b7280",cursor:"pointer",fontSize:12,fontFamily:"inherit"}}>↩ Logout</button>
         </div>
       </div>
@@ -646,16 +758,15 @@ function Dashboard({user,tickets,setTickets,onLogout}){
       {/* Main */}
       <div style={{flex:1,overflow:"auto",padding:28}}>
         {view==="admin"&&user.role==="regulator"&&<KelolAdmin users={users} setUsers={setUsers}/>}
+        {view==="sla"&&<SLAView tickets={myT} onSelectTicket={t=>{setSel(t);}}/>}
+        {view==="grafik"&&<GrafikView tickets={myT}/>}
 
         {view==="stats"&&(
           <div>
             <h2 style={{color:"#1a1a2e",margin:"0 0 20px",fontSize:22,fontWeight:800}}>📊 Statistik Tiket</h2>
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:12,marginBottom:24}}>
               {[["Total",stats.total,"#1a1a2e","#f9fafb"],["Baru",stats.baru,"#2563eb","#eff6ff"],["Diproses",stats.diproses,"#d97706","#fffbeb"],["Dikembalikan",stats.dikembalikan,"#dc2626","#fef2f2"],["Dieskalasi",stats.dieskalasi,"#7c3aed","#faf5ff"],["Dikerjakan",stats.dikerjakan,"#ea580c","#fff7ed"],["Selesai",stats.selesai,"#16a34a","#f0fdf4"]].map(([l,v,c,bg])=>(
-                <div key={l} style={{background:bg,borderRadius:12,border:`1px solid ${c}20`,padding:"14px 16px"}}>
-                  <div style={{color:c,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5,marginBottom:6,opacity:0.8}}>{l}</div>
-                  <div style={{color:c,fontSize:28,fontWeight:900}}>{v}</div>
-                </div>
+                <div key={l} style={{background:bg,borderRadius:12,border:`1px solid ${c}20`,padding:"14px 16px"}}><div style={{color:c,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5,marginBottom:6,opacity:0.8}}>{l}</div><div style={{color:c,fontSize:28,fontWeight:900}}>{v}</div></div>
               ))}
             </div>
             <Card><div style={{color:"#6b7280",fontSize:14}}>Tingkat penyelesaian: <strong style={{color:"#16a34a",fontSize:22}}>{stats.total?Math.round(stats.selesai/stats.total*100):0}%</strong></div></Card>
@@ -666,9 +777,7 @@ function Dashboard({user,tickets,setTickets,onLogout}){
           <div>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16,flexWrap:"wrap",gap:12}}>
               <h2 style={{color:"#1a1a2e",margin:0,fontSize:22,fontWeight:800}}>🎫 {user.role==="ta"?"Tiket Eskalasi":"Semua Tiket"} <span style={{color:"#9ca3af",fontSize:14,fontWeight:400}}>({filtered.length})</span></h2>
-              <Btn onClick={refresh} disabled={refreshing} v="secondary" sm>{refreshing?"⏳":"🔄"} Refresh</Btn>
             </div>
-
             {/* Filter bar */}
             <div style={{background:"#fff",borderRadius:10,border:"1px solid #e5e7eb",padding:"12px 16px",marginBottom:16,display:"flex",gap:10,flexWrap:"wrap",alignItems:"center"}}>
               <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 Cari ID, nama, alamat..." style={{padding:"8px 12px",borderRadius:8,border:"1.5px solid #d1d5db",background:"#f9fafb",color:"#1a1a2e",fontSize:13,fontFamily:"inherit",outline:"none",width:200}}/>
@@ -681,26 +790,25 @@ function Dashboard({user,tickets,setTickets,onLogout}){
                 {MASALAH_LIST.map(m=><option key={m} value={m}>{m}</option>)}
               </select>
             </div>
-
-            {/* Status filter tabs */}
+            {/* Status filter */}
             <div style={{display:"flex",gap:6,marginBottom:16,flexWrap:"wrap"}}>
               {[["all","Semua",stats.total],...Object.entries(STATUS_CONFIG).map(([k,v])=>[k,v.label,stats[k]||0])].map(([k,l,n])=>(
-                <button key={k} onClick={()=>setFS(k)} style={{padding:"6px 13px",borderRadius:20,border:`1.5px solid ${filterStatus===k?"#e2001a":"#d1d5db"}`,background:filterStatus===k?"#fff5f5":"#fff",color:filterStatus===k?"#e2001a":"#6b7280",cursor:"pointer",fontWeight:600,fontSize:12,fontFamily:"inherit",transition:"all 0.15s"}}>
+                <button key={k} onClick={()=>setFS(k)} style={{padding:"6px 13px",borderRadius:20,border:`1.5px solid ${filterStatus===k?"#e2001a":"#d1d5db"}`,background:filterStatus===k?"#fff5f5":"#fff",color:filterStatus===k?"#e2001a":"#6b7280",cursor:"pointer",fontWeight:600,fontSize:12,fontFamily:"inherit"}}>
                   {l} <span style={{background:"#f3f4f6",borderRadius:10,padding:"1px 6px",fontSize:10,marginLeft:4}}>{n}</span>
                 </button>
               ))}
             </div>
-
             {/* Table */}
             <div style={{background:"#fff",borderRadius:12,border:"1px solid #e5e7eb",overflow:"hidden",boxShadow:"0 1px 4px rgba(0,0,0,0.04)"}}>
-              <div style={{display:"grid",gridTemplateColumns:"110px 1fr 80px 75px 95px 105px 70px",gap:8,padding:"10px 16px",background:"#f9fafb",borderBottom:"1px solid #e5e7eb"}}>
-                {["ID TIKET","PELANGGAN / MASALAH","AREA","PRIORITAS","STATUS","TKT TELKOMSEL","MASUK"].map(h=><div key={h} style={{color:"#9ca3af",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>{h}</div>)}
+              <div style={{display:"grid",gridTemplateColumns:"110px 1fr 80px 75px 95px 100px 70px",gap:8,padding:"10px 16px",background:"#f9fafb",borderBottom:"1px solid #e5e7eb"}}>
+                {["ID TIKET","PELANGGAN / MASALAH","AREA","PRIORITAS","STATUS","SLA / TKT TELK.","MASUK"].map(h=><div key={h} style={{color:"#9ca3af",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>{h}</div>)}
               </div>
-              {filtered.length===0
-                ?<div style={{textAlign:"center",padding:40,color:"#9ca3af"}}>Tidak ada tiket</div>
-                :filtered.map((t,i)=>(
+              {filtered.length===0?<div style={{textAlign:"center",padding:40,color:"#9ca3af"}}>Tidak ada tiket</div>
+               :filtered.map((t,i)=>{
+                const sla=getSLA(t);
+                return(
                   <div key={t.id} onClick={()=>setSel(t)}
-                    style={{display:"grid",gridTemplateColumns:"110px 1fr 80px 75px 95px 105px 70px",gap:8,alignItems:"center",padding:"12px 16px",borderBottom:i<filtered.length-1?"1px solid #f3f4f6":"none",cursor:"pointer",transition:"background 0.1s",background:t.status==="dikembalikan"?"#fff5f5":"transparent"}}
+                    style={{display:"grid",gridTemplateColumns:"110px 1fr 80px 75px 95px 100px 70px",gap:8,alignItems:"center",padding:"12px 16px",borderBottom:i<filtered.length-1?"1px solid #f3f4f6":"none",cursor:"pointer",background:t.status==="dikembalikan"?"#fff5f5":"transparent"}}
                     onMouseEnter={e=>e.currentTarget.style.background="#f9fafb"}
                     onMouseLeave={e=>e.currentTarget.style.background=t.status==="dikembalikan"?"#fff5f5":"transparent"}>
                     <div style={{fontFamily:"monospace",fontSize:11,color:"#e2001a",fontWeight:700}}>{t.id}</div>
@@ -708,16 +816,19 @@ function Dashboard({user,tickets,setTickets,onLogout}){
                       <div style={{color:"#1a1a2e",fontSize:13,fontWeight:600}}>{t.namaPlg}</div>
                       <div style={{color:"#6b7280",fontSize:11,marginTop:1}}>{t.masalah}</div>
                       {t.nomorInternet&&<div style={{color:"#2563eb",fontSize:10,marginTop:2}}>🔌 {t.nomorInternet}</div>}
-                      {t.alamat&&<div style={{color:"#9ca3af",fontSize:10,marginTop:1}}>📍 {t.alamat.slice(0,35)}{t.alamat.length>35?"...":""}</div>}
                     </div>
                     <div style={{color:"#6b7280",fontSize:11}}>{t.sto}</div>
                     <PBadge p={t.prioritas}/>
                     <Badge status={t.status}/>
-                    <div style={{fontFamily:"monospace",fontSize:11,color:t.tiketTelkomsel?"#d97706":"#d1d5db",fontWeight:t.tiketTelkomsel?700:400}}>{t.tiketTelkomsel||"—"}</div>
+                    <div style={{display:"flex",flexDirection:"column",gap:3}}>
+                      {sla&&sla.key!=="fresh"&&<SLABadge ticket={t}/>}
+                      {t.tiketTelkomsel&&<span style={{fontFamily:"monospace",fontSize:10,color:"#d97706",fontWeight:700}}>{t.tiketTelkomsel}</span>}
+                      {!sla&&!t.tiketTelkomsel&&<span style={{color:"#d1d5db",fontSize:10}}>—</span>}
+                    </div>
                     <div style={{color:"#9ca3af",fontSize:10}}>{fmtShort(t.createdAt)}</div>
                   </div>
-                ))
-              }
+                );
+              })}
             </div>
           </div>
         )}
@@ -729,14 +840,8 @@ function Dashboard({user,tickets,setTickets,onLogout}){
 
 // ROOT
 function App(){
-  const [page,setPage]=useState("loading");
-  const [user,setUser]=useState(null);
-  const [tickets,setTickets]=useState([]);
-  useEffect(()=>{
-    const s=lsGet("ih_session",null);
-    if(s?.id){setUser(s);api.get("getTickets").then(d=>{if(Array.isArray(d))setTickets(d);setPage("dashboard");});}
-    else setPage("customer");
-  },[]);
+  const [page,setPage]=useState("loading");const [user,setUser]=useState(null);const [tickets,setTickets]=useState([]);
+  useEffect(()=>{const s=lsGet("ih_session",null);if(s?.id){setUser(s);api.get("getTickets").then(d=>{if(Array.isArray(d))setTickets(d);setPage("dashboard");});}else setPage("customer");},[]);
   const handleLogin=async u=>{setUser(u);const d=await api.get("getTickets");if(Array.isArray(d))setTickets(d);setPage("dashboard");};
   const logout=()=>{localStorage.removeItem("ih_session");setUser(null);setTickets([]);setPage("customer");};
   if(page==="loading")return <Spinner/>;
