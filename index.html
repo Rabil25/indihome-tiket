@@ -196,7 +196,7 @@ function CustomerPortal({onSubmit,onGoAdmin}){
       {tab==="cek"&&<CekTiket/>}
       {tab==="lapor"&&(<Card className="fade"><div style={{display:"flex",flexDirection:"column",gap:18}}>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}><Inp label="Nama Lengkap" value={f.namaPlg} onChange={v=>sf("namaPlg",v)} required placeholder="Budi Santoso" error={errors.namaPlg}/><Inp label="No. Telepon" value={f.noTelp} onChange={v=>sf("noTelp",v.replace(/[^0-9\s\-\+]/g,""))} required placeholder="08123456789" error={errors.noTelp}/></div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}><Inp label="Email" type="email" value={f.emailPlg} onChange={v=>sf("emailPlg",v)} required placeholder="nama@gmail.com" error={errors.emailPlg}/><Inp label="Nomor Internet / Pelanggan" value={f.nomorInternet} onChange={v=>sf("nomorInternet",v.replace(/[^0-9]/g,""))} required placeholder="Cth: 1234567890" error={errors.nomorInternet} hint="Tertera di tagihan / modem"/></div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}><Inp label="Email" type="email" value={f.emailPlg} onChange={v=>sf("emailPlg",v)} required placeholder="nama@gmail.com" error={errors.emailPlg}/><Inp label="Nomor Internet / Pelanggan" value={f.nomorInternet} onChange={v=>sf("nomorInternet",v.replace(/[^0-9]/g,""))} required placeholder="Cth: 1114567890" error={errors.nomorInternet} hint="Tertera di tagihan / modem"/></div>
         <Inp label="Alamat Lengkap" value={f.alamat} onChange={v=>sf("alamat",v)} required rows={2} placeholder="Jl. Raya No.1, Kelurahan, Kecamatan..." error={errors.alamat}/>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}><Sel label="Area" value={f.sto} onChange={v=>sf("sto",v)} options={AREA_LIST} required/><Sel label="Jenis Masalah" value={f.masalah} onChange={v=>{sf("masalah",v);sf("passwordLama","");sf("passwordBaru","");}} options={MASALAH_LIST} required/></div>
         {isGantiPwd&&(<div style={{background:"#fffbeb",border:"1.5px solid #fcd34d",borderRadius:10,padding:16,display:"flex",flexDirection:"column",gap:14}} className="fade"><div style={{color:"#92400e",fontSize:13,fontWeight:700}}>🔑 Informasi Password WiFi</div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}><Inp label="Password WiFi Lama" value={f.passwordLama} onChange={v=>sf("passwordLama",v)} required placeholder="Password saat ini" error={errors.passwordLama} bg="#fff"/><Inp label="Password WiFi Baru" value={f.passwordBaru} onChange={v=>sf("passwordBaru",v)} required placeholder="Min. 8 karakter" error={errors.passwordBaru} bg="#fff" hint="Minimal 8 karakter"/></div></div>)}
@@ -246,21 +246,15 @@ function TicketModal({ticket,user,onClose,onUpdate}){
       `━━━━━━━━━━━━━━━━━━━━`,
       `🕐 Dilaporkan: ${fmtDate(ticket.createdAt)}`,
     ].filter(l=>l!=="").join("\n");
-
-    navigator.clipboard.writeText(lines).then(()=>{
-      setCopied(true);
-      setTimeout(()=>setCopied(false),3000);
-    }).catch(()=>{
-      // Fallback untuk browser yang tidak support clipboard API
-      const ta=document.createElement("textarea");
-      ta.value=lines;ta.style.position="fixed";ta.style.opacity="0";
-      document.body.appendChild(ta);ta.select();
-      document.execCommand("copy");
-      document.body.removeChild(ta);
-      setCopied(true);setTimeout(()=>setCopied(false),3000);
-    });
+    navigator.clipboard.writeText(lines).then(()=>{setCopied(true);setTimeout(()=>setCopied(false),3000);}).catch(()=>{const ta=document.createElement("textarea");ta.value=lines;ta.style.position="fixed";ta.style.opacity="0";document.body.appendChild(ta);ta.select();document.execCommand("copy");document.body.removeChild(ta);setCopied(true);setTimeout(()=>setCopied(false),3000);});
   };
+
+  // upd: update tiket ke server
+  const upd=async patch=>{setLoading(true);const merged={...ticket,...patch,updatedAt:new Date().toISOString()};const res=await api.post("updateTicket",merged);if(res.success)onUpdate(merged);else alert("Gagal: "+(res.error||""));setLoading(false);};
   const branchSelesai=async()=>upd({status:"selesai",tiketTelkomsel:tiketTlk,catatanBranch,resolvedAt:new Date().toISOString(),adminBranch:user.id});
+  const taSelesai=async()=>upd({status:"selesai",teknisi,catatanTA,tiketTelkomsel:tiketTlk,resolvedAt:new Date().toISOString()});
+  const rollback=async()=>{if(!alasan.trim()){alert("Isi alasan rollback");return;}upd({status:"dikembalikan",alasanRollback:alasan,teknisi:"",catatanTA:""});};
+  const prosesUlang=async()=>upd({status:"diproses",alasanRollback:""});
   const taSelesai=async()=>upd({status:"selesai",teknisi,catatanTA,tiketTelkomsel:tiketTlk,resolvedAt:new Date().toISOString()});
   const rollback=async()=>{if(!alasan.trim()){alert("Isi alasan rollback");return;}upd({status:"dikembalikan",alasanRollback:alasan,teknisi:"",catatanTA:""});};
   const prosesUlang=async()=>upd({status:"diproses",alasanRollback:""});
@@ -293,7 +287,13 @@ function TicketModal({ticket,user,onClose,onUpdate}){
       {isBranch&&["baru","diproses","dikembalikan"].includes(ticket.status)&&<Inp label="No. Tiket Telkomsel (opsional)" value={tiketTlk} onChange={setTiketTlk} placeholder="Cth: 1-123456789"/>}
       {ticket.tiketTelkomsel&&<Ibox label="No. Tiket Telkomsel" value={ticket.tiketTelkomsel} icon="📌" col={true}/>}
       {isBranch&&ticket.status==="diproses"&&<Inp label="Keterangan Penanganan (jika selesai sendiri)" value={catatanBranch} onChange={setCatatanBranch} rows={2} placeholder="Cth: Sudah reset password sesuai permintaan pelanggan..."/>}
-      {isTA&&["dieskalasi","dikerjakan"].includes(ticket.status)&&<div style={{display:"flex",flexDirection:"column",gap:12}}><Inp label="Nama Teknisi" value={teknisi} onChange={setTeknisi} placeholder="Nama / Tim teknisi"/><Inp label="Catatan Penanganan TA" value={catatanTA} onChange={setCatatanTA} rows={3} placeholder="Tindakan yang dilakukan..."/></div>}
+      {/* Fix 5: TA assign teknisi (dieskalasi) - no catatan yet */}
+      {isTA&&ticket.status==="dieskalasi"&&<Inp label="Nama Teknisi" value={teknisi} onChange={setTeknisi} placeholder="Nama / Tim teknisi"/>}
+      {/* TA catatan penyelesaian - only when dikerjakan (about to finish) */}
+      {isTA&&ticket.status==="dikerjakan"&&<div style={{display:"flex",flexDirection:"column",gap:12}}>
+        <Inp label="Nama Teknisi" value={teknisi} onChange={setTeknisi} placeholder="Nama / Tim teknisi"/>
+        <Inp label="Catatan Penyelesaian" value={catatanTA} onChange={setCatatanTA} rows={3} placeholder="Ringkasan tindakan yang sudah dilakukan dan hasil penanganan..."/>
+      </div>}
       {ticket.catatanBranch&&isTA&&<div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:8,padding:"12px 14px"}}><div style={{color:"#166534",fontSize:10,fontWeight:700,marginBottom:4}}>📝 CATATAN ADMIN BRANCH</div><div style={{color:"#374151",fontSize:13}}>{ticket.catatanBranch}</div></div>}
       {ticket.teknisi&&isBranch&&<div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:8,padding:"12px 14px"}}><div style={{color:"#166534",fontSize:10,fontWeight:700,marginBottom:6}}>👷 TEKNISI & CATATAN TA</div><div style={{color:"#1a1a2e",fontSize:14,fontWeight:600}}>{ticket.teknisi}</div>{ticket.catatanTA&&<div style={{color:"#6b7280",fontSize:13,marginTop:4}}>{ticket.catatanTA}</div>}</div>}
       {isTA&&["dieskalasi","dikerjakan"].includes(ticket.status)&&<div style={{background:"#fef2f2",border:"1.5px dashed #fca5a5",borderRadius:10,padding:14}}><div style={{color:"#dc2626",fontSize:12,fontWeight:700,marginBottom:8}}>↩️ KEMBALIKAN KE ADMIN BRANCH</div><Inp label="Alasan Rollback" value={alasan} onChange={setAlasan} rows={2} placeholder="Contoh: Tiket Telkomsel tidak terdeteksi..." bg="#fff"/><div style={{marginTop:10}}><Btn onClick={rollback} disabled={loading} v="danger" sm>↩️ Rollback ke Branch</Btn></div></div>}
@@ -332,6 +332,33 @@ function ToastContainer({toasts,onDismiss}){
   </div>);
 }
 
+// ── LiveTimer: isolated countdown agar Dashboard tidak re-render tiap detik ──
+function LiveTimer({onRefresh, refreshing, compact=false}){
+  const [countdown,setCountdown]=useState(POLL_INTERVAL);
+  const [lastSync,setLastSync]=useState(new Date());
+  // Expose lastSync setter agar Dashboard bisa trigger update
+  LiveTimer._setLastSync=setLastSync;
+  useEffect(()=>{
+    setCountdown(POLL_INTERVAL);
+    const tick=setInterval(()=>setCountdown(p=>p<=1?POLL_INTERVAL:p-1),1000);
+    return()=>clearInterval(tick);
+  },[lastSync]);
+  if(compact) return(
+    <div style={{display:"flex",alignItems:"center",gap:4,background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:20,padding:"3px 8px"}}>
+      <div style={{width:6,height:6,borderRadius:"50%",background:"#16a34a",animation:"pulse 1.5s infinite"}}/>
+      <span style={{color:"#15803d",fontSize:10,fontWeight:700}}>{countdown}s</span>
+    </div>
+  );
+  return(<div>
+    <div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:8,padding:"8px 10px",marginBottom:10,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+      <div style={{display:"flex",alignItems:"center",gap:6}}><div style={{width:7,height:7,borderRadius:"50%",background:"#16a34a",animation:"pulse 1.5s infinite"}}/><span style={{color:"#15803d",fontSize:11,fontWeight:700}}>LIVE</span></div>
+      <div style={{textAlign:"right"}}><div style={{color:"#6b7280",fontSize:10}}>Refresh dalam</div><div style={{color:"#15803d",fontWeight:700,fontSize:12,fontFamily:"monospace"}}>{countdown}s</div></div>
+    </div>
+    <div style={{textAlign:"center",marginBottom:8}}><span style={{color:"#9ca3af",fontSize:10}}>Sync: {lastSync.toLocaleTimeString("id-ID",{hour:"2-digit",minute:"2-digit",second:"2-digit"})}</span></div>
+    <button onClick={onRefresh} disabled={refreshing} style={{width:"100%",padding:"7px",background:refreshing?"#f9fafb":"#fff5f5",border:"1px solid #fecaca",borderRadius:8,color:refreshing?"#9ca3af":"#e2001a",cursor:refreshing?"not-allowed":"pointer",fontSize:12,fontFamily:"inherit",fontWeight:600,marginBottom:8}}>{refreshing?"⏳ Memuat...":"🔄 Refresh Sekarang"}</button>
+  </div>);
+}
+
 // ══════════════════════════════════════════════════════════════
 // DASHBOARD
 // ══════════════════════════════════════════════════════════════
@@ -341,7 +368,6 @@ function Dashboard({user,tickets,setTickets,onLogout}){
   const [sel,setSel]=useState(null);
   const [filterStatus,setFS]=useState("all");const [filterMasalah,setFM]=useState("all");const [filterArea,setFA]=useState("all");
   const [search,setSearch]=useState("");const [refreshing,setRef]=useState(false);const [users,setUsers]=useState([]);
-  const [countdown,setCountdown]=useState(POLL_INTERVAL);const [lastSync,setLastSync]=useState(new Date());
   const [toasts,setToasts]=useState([]);const prevTicketsRef=useRef({});const toastIdRef=useRef(0);
 
   const addToast=(type,icon,title,msg)=>{const id=++toastIdRef.current;setToasts(p=>[...p.slice(-4),{id,type,icon,title,msg}]);setTimeout(()=>setToasts(p=>p.filter(t=>t.id!==id)),7000);};
@@ -364,13 +390,18 @@ function Dashboard({user,tickets,setTickets,onLogout}){
   const doRefresh=useCallback(async(silent=false)=>{
     if(!silent)setRef(true);
     const d=await api.get("getTickets");
-    if(Array.isArray(d)){const oldMap=prevTicketsRef.current;detectChanges(oldMap,d);const newMap={};d.forEach(t=>newMap[t.id]=t);prevTicketsRef.current=newMap;setTickets(d);if(!silent)setLastSync(new Date());}
+    if(Array.isArray(d)){
+      const oldMap=prevTicketsRef.current;detectChanges(oldMap,d);
+      const newMap={};d.forEach(t=>newMap[t.id]=t);prevTicketsRef.current=newMap;
+      setTickets(d);
+      // Update LiveTimer lastSync
+      if(LiveTimer._setLastSync) LiveTimer._setLastSync(new Date());
+    }
     if(!silent)setRef(false);
   },[detectChanges,setTickets]);
 
   useEffect(()=>{if(user.role==="regulator")api.get("getUsers").then(d=>{if(Array.isArray(d))setUsers(d);});const map={};tickets.forEach(t=>map[t.id]=t);prevTicketsRef.current=map;},[]);
   useEffect(()=>{const poll=setInterval(()=>doRefresh(true),POLL_INTERVAL*1000);return()=>clearInterval(poll);},[doRefresh]);
-  useEffect(()=>{setCountdown(POLL_INTERVAL);const tick=setInterval(()=>setCountdown(p=>p<=1?POLL_INTERVAL:p-1),1000);return()=>clearInterval(tick);},[lastSync]);
   useEffect(()=>{const fn=()=>{if(document.visibilityState==="visible")doRefresh(true);};document.addEventListener("visibilitychange",fn);return()=>document.removeEventListener("visibilitychange",fn);},[doRefresh]);
   const refresh=()=>doRefresh(false);
 
@@ -477,78 +508,58 @@ function Dashboard({user,tickets,setTickets,onLogout}){
     </div>)}
   </div>);
 
-  // Live indicator component
-  const LiveIndicator=({compact=false})=>compact?(
-    <div style={{display:"flex",alignItems:"center",gap:4,background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:20,padding:"3px 8px"}}>
-      <div style={{width:6,height:6,borderRadius:"50%",background:"#16a34a",animation:"pulse 1.5s infinite"}}/>
-      <span style={{color:"#15803d",fontSize:10,fontWeight:700}}>{countdown}s</span>
-    </div>
-  ):(
-    <div>
-      <div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:8,padding:"8px 10px",marginBottom:10,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-        <div style={{display:"flex",alignItems:"center",gap:6}}><div style={{width:7,height:7,borderRadius:"50%",background:"#16a34a",animation:"pulse 1.5s infinite"}}/><span style={{color:"#15803d",fontSize:11,fontWeight:700}}>LIVE</span></div>
-        <div style={{textAlign:"right"}}><div style={{color:"#6b7280",fontSize:10}}>Refresh dalam</div><div style={{color:"#15803d",fontWeight:700,fontSize:12,fontFamily:"monospace"}}>{countdown}s</div></div>
+  // ── MOBILE LAYOUT ──
+  if(isMobile) return(
+    <div style={{display:"flex",flexDirection:"column",minHeight:"100vh"}}>
+      <ToastContainer toasts={toasts} onDismiss={dismissToast}/>
+      {/* Topbar */}
+      <div style={{background:"#fff",borderBottom:"1px solid #e5e7eb",padding:"10px 14px",display:"flex",justifyContent:"space-between",alignItems:"center",position:"sticky",top:0,zIndex:20,boxShadow:"0 1px 4px rgba(0,0,0,0.06)"}}>
+        <Logo height={30}/>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <LiveTimer onRefresh={refresh} refreshing={refreshing} compact={true}/>
+          <div style={{background:"#f9fafb",borderRadius:8,padding:"3px 8px",border:"1px solid #e5e7eb",textAlign:"right"}}>
+            <div style={{color:roleColor[user.role],fontSize:10,fontWeight:700}}>{user.name}</div>
+            <div style={{color:"#9ca3af",fontSize:9}}>{user.role==="ta"?"Admin TA":user.role==="regulator"?"Regulator":"Admin Branch"}</div>
+          </div>
+          <button onClick={()=>refresh()} disabled={refreshing} style={{background:refreshing?"#f9fafb":"#fff5f5",border:"1px solid #fecaca",borderRadius:8,color:"#e2001a",cursor:"pointer",fontSize:11,padding:"5px 8px",fontFamily:"inherit",fontWeight:700}}>{refreshing?"⏳":"🔄"}</button>
+          <button onClick={onLogout} style={{background:"none",border:"1px solid #e5e7eb",borderRadius:8,color:"#6b7280",cursor:"pointer",fontSize:11,padding:"5px 8px",fontFamily:"inherit"}}>↩</button>
+        </div>
       </div>
-      <div style={{textAlign:"center",marginBottom:8}}><span style={{color:"#9ca3af",fontSize:10}}>Sync: {lastSync.toLocaleTimeString("id-ID",{hour:"2-digit",minute:"2-digit",second:"2-digit"})}</span></div>
-      <button onClick={()=>refresh()} disabled={refreshing} style={{width:"100%",padding:"7px",background:refreshing?"#f9fafb":"#fff5f5",border:"1px solid #fecaca",borderRadius:8,color:refreshing?"#9ca3af":"#e2001a",cursor:refreshing?"not-allowed":"pointer",fontSize:12,fontFamily:"inherit",fontWeight:600,marginBottom:8}}>{refreshing?"⏳ Memuat...":"🔄 Refresh Sekarang"}</button>
+      <div style={{flex:1,overflow:"auto",padding:"16px 12px 90px"}}><MainContent/></div>
+      {/* Bottom nav */}
+      <div style={{position:"fixed",bottom:0,left:0,right:0,background:"#fff",borderTop:"1px solid #e5e7eb",display:"flex",zIndex:20,boxShadow:"0 -2px 8px rgba(0,0,0,0.08)"}}>
+        {navItems.map(n=>(<button key={n.id} onClick={()=>setView(n.id)} style={{flex:1,padding:"8px 4px 10px",border:"none",background:"transparent",display:"flex",flexDirection:"column",alignItems:"center",gap:2,cursor:"pointer",position:"relative",borderTop:`2.5px solid ${view===n.id?"#e2001a":"transparent"}`}}>
+          <span style={{fontSize:20}}>{n.ic}</span>
+          <span style={{fontSize:10,fontWeight:600,color:view===n.id?"#e2001a":"#6b7280"}}>{n.lb}</span>
+          {n.badge>0&&<span style={{position:"absolute",top:4,right:"15%",background:n.bc||"#e2001a",color:"#fff",borderRadius:10,padding:"0 5px",fontSize:9,fontWeight:700,lineHeight:"14px"}}>{n.badge}</span>}
+        </button>))}
+      </div>
+      {sel&&<TicketModal ticket={sel} user={user} onClose={()=>setSel(null)} onUpdate={updateTicket}/>}
     </div>
   );
 
+  // ── DESKTOP LAYOUT ──
   return(<div style={{minHeight:"100vh",background:"#f5f7fa"}}>
     <ToastContainer toasts={toasts} onDismiss={dismissToast}/>
-
-    {isMobile?(
-      /* ══ MOBILE ══ */
-      <div style={{display:"flex",flexDirection:"column",minHeight:"100vh"}}>
-        {/* Topbar */}
-        <div style={{background:"#fff",borderBottom:"1px solid #e5e7eb",padding:"10px 14px",display:"flex",justifyContent:"space-between",alignItems:"center",position:"sticky",top:0,zIndex:20,boxShadow:"0 1px 4px rgba(0,0,0,0.06)"}}>
-          <Logo height={30}/>
-          <div style={{display:"flex",alignItems:"center",gap:8}}>
-            <LiveIndicator compact={true}/>
-            <div style={{background:"#f9fafb",borderRadius:8,padding:"3px 8px",border:"1px solid #e5e7eb",textAlign:"right"}}>
-              <div style={{color:roleColor[user.role],fontSize:10,fontWeight:700}}>{user.name}</div>
-              <div style={{color:"#9ca3af",fontSize:9}}>{user.role==="ta"?"Admin TA":user.role==="regulator"?"Regulator":"Admin Branch"}</div>
-            </div>
-            <button onClick={()=>refresh()} disabled={refreshing} style={{background:refreshing?"#f9fafb":"#fff5f5",border:"1px solid #fecaca",borderRadius:8,color:"#e2001a",cursor:"pointer",fontSize:11,padding:"5px 8px",fontFamily:"inherit",fontWeight:700}}>{refreshing?"⏳":"🔄"}</button>
-            <button onClick={onLogout} style={{background:"none",border:"1px solid #e5e7eb",borderRadius:8,color:"#6b7280",cursor:"pointer",fontSize:11,padding:"5px 8px",fontFamily:"inherit"}}>↩</button>
+    <div style={{display:"flex",minHeight:"100vh"}}>
+      {/* Sidebar — fixed width, tidak ikut stretch */}
+      <div style={{width:230,minWidth:230,maxWidth:230,background:"#fff",borderRight:"1px solid #e5e7eb",display:"flex",flexDirection:"column",padding:"16px 0",flexShrink:0,boxShadow:"2px 0 6px rgba(0,0,0,0.04)",overflow:"hidden"}}>
+        <div style={{padding:"0 16px 16px",borderBottom:"1px solid #e5e7eb",marginBottom:12,display:"flex",justifyContent:"center"}}><Logo height={36}/></div>
+        {navItems.map(n=><NavBtn key={n.id} id={n.id} ic={n.ic} lb={n.lb} badge={n.badge||0} bc={n.bc||"#e2001a"}/>)}
+        <div style={{flex:1}}/>
+        <div style={{padding:16,borderTop:"1px solid #e5e7eb"}}>
+          <div style={{background:"#f9fafb",borderRadius:8,padding:12,marginBottom:10,border:"1px solid #e5e7eb"}}>
+            <div style={{color:"#1a1a2e",fontWeight:700,fontSize:13,marginBottom:2}}>{user.name}</div>
+            <div style={{color:roleColor[user.role],fontSize:11,fontWeight:700,textTransform:"uppercase",marginBottom:2}}>{user.role==="ta"?"Admin TA":user.role==="regulator"?"Regulator":"Admin Branch"}</div>
+            <div style={{color:"#9ca3af",fontSize:11}}>{user.branch}</div>
           </div>
-        </div>
-        {/* Content */}
-        <div style={{flex:1,overflow:"auto",padding:"16px 12px 90px"}}>
-          <MainContent/>
-        </div>
-        {/* Bottom nav */}
-        <div style={{position:"fixed",bottom:0,left:0,right:0,background:"#fff",borderTop:"1px solid #e5e7eb",display:"flex",zIndex:20,boxShadow:"0 -2px 8px rgba(0,0,0,0.08)"}}>
-          {navItems.map(n=>(<button key={n.id} onClick={()=>setView(n.id)} style={{flex:1,padding:"8px 4px 10px",border:"none",background:"transparent",display:"flex",flexDirection:"column",alignItems:"center",gap:2,cursor:"pointer",position:"relative",borderTop:`2.5px solid ${view===n.id?"#e2001a":"transparent"}`}}>
-            <span style={{fontSize:20}}>{n.ic}</span>
-            <span style={{fontSize:10,fontWeight:600,color:view===n.id?"#e2001a":"#6b7280"}}>{n.lb}</span>
-            {n.badge>0&&<span style={{position:"absolute",top:4,right:"15%",background:n.bc||"#e2001a",color:"#fff",borderRadius:10,padding:"0 5px",fontSize:9,fontWeight:700,lineHeight:"14px"}}>{n.badge}</span>}
-          </button>))}
+          <LiveTimer onRefresh={refresh} refreshing={refreshing} compact={false}/>
+          <button onClick={onLogout} style={{width:"100%",padding:"8px",background:"none",border:"1px solid #e5e7eb",borderRadius:8,color:"#6b7280",cursor:"pointer",fontSize:12,fontFamily:"inherit"}}>↩ Logout</button>
         </div>
       </div>
-    ):(
-      /* ══ DESKTOP ══ */
-      <div style={{display:"flex",minHeight:"100vh"}}>
-        {/* Sidebar */}
-        <div style={{width:230,background:"#fff",borderRight:"1px solid #e5e7eb",display:"flex",flexDirection:"column",padding:"16px 0",flexShrink:0,boxShadow:"2px 0 6px rgba(0,0,0,0.04)"}}>
-          <div style={{padding:"0 16px 16px",borderBottom:"1px solid #e5e7eb",marginBottom:12,display:"flex",justifyContent:"center"}}><Logo height={36}/></div>
-          {navItems.map(n=><NavBtn key={n.id} id={n.id} ic={n.ic} lb={n.lb} badge={n.badge||0} bc={n.bc||"#e2001a"}/>)}
-          <div style={{flex:1}}/>
-          <div style={{padding:16,borderTop:"1px solid #e5e7eb"}}>
-            <div style={{background:"#f9fafb",borderRadius:8,padding:12,marginBottom:10,border:"1px solid #e5e7eb"}}>
-              <div style={{color:"#1a1a2e",fontWeight:700,fontSize:13,marginBottom:2}}>{user.name}</div>
-              <div style={{color:roleColor[user.role],fontSize:11,fontWeight:700,textTransform:"uppercase",marginBottom:2}}>{user.role==="ta"?"Admin TA":user.role==="regulator"?"Regulator":"Admin Branch"}</div>
-              <div style={{color:"#9ca3af",fontSize:11}}>{user.branch}</div>
-            </div>
-            <LiveIndicator compact={false}/>
-            <button onClick={onLogout} style={{width:"100%",padding:"8px",background:"none",border:"1px solid #e5e7eb",borderRadius:8,color:"#6b7280",cursor:"pointer",fontSize:12,fontFamily:"inherit"}}>↩ Logout</button>
-          </div>
-        </div>
-        {/* Main */}
-        <div style={{flex:1,overflow:"auto",padding:28}}><MainContent/></div>
-      </div>
-    )}
-
+      {/* Main */}
+      <div style={{flex:1,overflow:"auto",minWidth:0,padding:28}}><MainContent/></div>
+    </div>
     {sel&&<TicketModal ticket={sel} user={user} onClose={()=>setSel(null)} onUpdate={updateTicket}/>}
   </div>);
 }
