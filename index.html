@@ -196,7 +196,7 @@ function CustomerPortal({onSubmit,onGoAdmin}){
       {tab==="cek"&&<CekTiket/>}
       {tab==="lapor"&&(<Card className="fade"><div style={{display:"flex",flexDirection:"column",gap:18}}>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}><Inp label="Nama Lengkap" value={f.namaPlg} onChange={v=>sf("namaPlg",v)} required placeholder="Budi Santoso" error={errors.namaPlg}/><Inp label="No. Telepon" value={f.noTelp} onChange={v=>sf("noTelp",v.replace(/[^0-9\s\-\+]/g,""))} required placeholder="08123456789" error={errors.noTelp}/></div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}><Inp label="Email" type="email" value={f.emailPlg} onChange={v=>sf("emailPlg",v)} required placeholder="nama@gmail.com" error={errors.emailPlg}/><Inp label="Nomor Internet / Pelanggan" value={f.nomorInternet} onChange={v=>sf("nomorInternet",v.replace(/[^0-9]/g,""))} required placeholder="Cth: 11123456789" error={errors.nomorInternet} hint="Tertera di tagihan / modem"/></div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}><Inp label="Email" type="email" value={f.emailPlg} onChange={v=>sf("emailPlg",v)} required placeholder="nama@gmail.com" error={errors.emailPlg}/><Inp label="Nomor Internet / Pelanggan" value={f.nomorInternet} onChange={v=>sf("nomorInternet",v.replace(/[^0-9]/g,""))} required placeholder="Cth: 1234567890" error={errors.nomorInternet} hint="Tertera di tagihan / modem"/></div>
         <Inp label="Alamat Lengkap" value={f.alamat} onChange={v=>sf("alamat",v)} required rows={2} placeholder="Jl. Raya No.1, Kelurahan, Kecamatan..." error={errors.alamat}/>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}><Sel label="Area" value={f.sto} onChange={v=>sf("sto",v)} options={AREA_LIST} required/><Sel label="Jenis Masalah" value={f.masalah} onChange={v=>{sf("masalah",v);sf("passwordLama","");sf("passwordBaru","");}} options={MASALAH_LIST} required/></div>
         {isGantiPwd&&(<div style={{background:"#fffbeb",border:"1.5px solid #fcd34d",borderRadius:10,padding:16,display:"flex",flexDirection:"column",gap:14}} className="fade"><div style={{color:"#92400e",fontSize:13,fontWeight:700}}>🔑 Informasi Password WiFi</div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}><Inp label="Password WiFi Lama" value={f.passwordLama} onChange={v=>sf("passwordLama",v)} required placeholder="Password saat ini" error={errors.passwordLama} bg="#fff"/><Inp label="Password WiFi Baru" value={f.passwordBaru} onChange={v=>sf("passwordBaru",v)} required placeholder="Min. 8 karakter" error={errors.passwordBaru} bg="#fff" hint="Minimal 8 karakter"/></div></div>)}
@@ -538,9 +538,9 @@ function Dashboard({user,tickets,setTickets,onLogout}){
   // ── DESKTOP LAYOUT ──
   return(<div style={{minHeight:"100vh",background:"#f5f7fa"}}>
     <ToastContainer toasts={toasts} onDismiss={dismissToast}/>
-    <div style={{display:"flex",minHeight:"100vh"}}>
+    <div style={{display:"flex",minHeight:"100vh",alignItems:"flex-start"}}>
       {/* Sidebar — fixed width, tidak ikut stretch */}
-      <div style={{width:230,minWidth:230,maxWidth:230,background:"#fff",borderRight:"1px solid #e5e7eb",display:"flex",flexDirection:"column",padding:"16px 0",flexShrink:0,boxShadow:"2px 0 6px rgba(0,0,0,0.04)",overflow:"hidden"}}>
+      <div style={{flex:"0 0 230px",width:230,minWidth:230,maxWidth:230,background:"#fff",borderRight:"1px solid #e5e7eb",display:"flex",flexDirection:"column",padding:"16px 0",flexShrink:0,flexGrow:0,boxShadow:"2px 0 6px rgba(0,0,0,0.04)",overflow:"hidden",position:"sticky",top:0,height:"100vh",alignSelf:"flex-start"}}>
         <div style={{padding:"0 16px 16px",borderBottom:"1px solid #e5e7eb",marginBottom:12,display:"flex",justifyContent:"center"}}><Logo height={36}/></div>
         {navItems.map(n=><NavBtn key={n.id} id={n.id} ic={n.ic} lb={n.lb} badge={n.badge||0} bc={n.bc||"#e2001a"}/>)}
         <div style={{flex:1}}/>
